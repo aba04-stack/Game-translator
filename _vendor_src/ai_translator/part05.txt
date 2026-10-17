@@ -1,0 +1,124 @@
+ights = [max(1, int(w)) for w in weights]
+    total = sum(safe_weights) or parts_count
+    total_len = len(text)
+
+    cuts: list[int] = []
+    used = 0
+    for idx, weight in enumerate(safe_weights[:-1], start=1):
+        used += weight
+        target = round(total_len * used / total)
+        min_pos = cuts[-1] if cuts else 0
+        max_pos = total_len - (parts_count - idx)
+        pos = max(min_pos, min(target, max_pos))
+        pos = _snap_to_word_boundary(text, pos, min_pos, max_pos)
+        cuts.append(pos)
+
+    out: list[str] = []
+    start = 0
+    for cut in cuts:
+        out.append(text[start:cut])
+        start = cut
+    out.append(text[start:])
+    return out
+
+
+def _build_translation_with_original_codes(original: str, translated: str) -> str:
+    """
+    Пересобрать перевод так, чтобы все escape-коды из оригинала сохранились.
+    Если AI сломал/потерял коды, берём текст перевода и вставляем оригинальные коды
+    в те же позиции между текстовыми сегментами.
+    """
+    orig_tokens = _split_code_tokens(original)
+    orig_codes = [value for kind, value in orig_tokens if kind == "code"]
+    if not orig_codes:
+        return translated
+
+    if _validate_codes(original, translated):
+        return translated
+
+    clean_translation = _strip_codes(translated)
+    if not clean_translation.strip():
+        # Если перевод почти пустой, лучше сохранить текст без кодов из оригинала,
+        # чем потерять всю строку.
+        clean_translation = _strip_codes(original)
+
+    text_segments = [value for kind, value in orig_tokens if kind == "text"]
+    if not text_segments:
+        return translated
+
+    translated_segments = _split_text_by_weights(clean_translation, [len(s) for s in text_segments])
+
+    rebuilt: list[str] = []
+    text_idx = 0
+    for kind, value in orig_tokens:
+        if kind == "text":
+            rebuilt.append(translated_segments[text_idx])
+            text_idx += 1
+        else:
+            rebuilt.append(value)
+
+    return "".join(rebuilt)
+
+
+def _repair_codes(original: str, translated: str) -> str:
+    """Попытаться автоматически восстановить потерянные escape-коды."""
+    if not translated:
+        return translated
+    repaired = _build_translation_with_original_codes(original, translated)
+    return repaired
+
+
+def _validate_codes(original: str, translated: str) -> bool:
+    """Проверить, что все RPG Maker коды из оригинала присутствуют в переводе
+    в том же порядке. Порядок важен: \\C[2]text\\C[0] ≠ \\C[0]text\\C[2]."""
+    orig_codes = _extract_codes(original)
+    if not orig_codes:
+        return True
+    trans_codes = _extract_codes(translated)
+    return orig_codes == trans_codes   # ordered, not sorted
+
+
+def _protect_texts(texts: list[str], game_type: str = "unknown") -> tuple[list[str], list[dict[str, str]]]:
+    protected_texts: list[str] = []
+    all_placeholders: list[dict[str, str]] = []
+    for text in texts:
+        protected, placeholders = _protect_codes(text, game_type)
+        protected_texts.append(protected)
+        all_placeholders.append(placeholders)
+    return protected_texts, all_placeholders
+
+def _strip_context_hint(text: str) -> str:
+    """Удалить контекстную подсказку из начала строки, если AI её повторил.
+
+    BUG FIX: некоторые модели (Groq llama-8b, старые Gemini) игнорируют
+    правило 7 промпта и эхо-повторяют (Speaker: Name, Type: Dialog) в переводе.
+    Результат в игре: «(Speaker: Alice) Привет!» вместо «Привет!».
+    Паттерн консервативен — требует «:» внутри скобок, не трогает
+    японские/кириллические скобки и обычный текст в круглых скобках.
+    """
+    m = re.match(r"^\s*\([^)]{1,80}\)\s*", text)
+    if m and ":" in m.group(0):
+        return text[m.end():]
+    return text
+
+
+def _validate_and_repair_batch(
+    originals: list[str],
+    translations: list[str],
+    log_callback,
+    game_type: str = "unknown",
+) -> list[str]:
+    """Strip AI artifacts (markdown, think-tags, trailing notes) and log code issues.
+
+    Escape code preservation is handled upstream by the §N§ placeholder system.
+    Auto-repair is disabled — if §N§ was lost it means the AI ignored the prompt;
+    the right fix is a better prompt or smaller batch_size.
+    """
+    result: list[str] = list(translations)
+    missing_codes = 0
+    for i, (orig, trans) in enumerate(zip(originals, result)):
+        if not trans:
+            continue
+        # 1. Strip model artifacts: think-blocks, **markdown**, trailing notes
+        trans = _clean_translation(trans)
+        # 2. Remove echoed contex

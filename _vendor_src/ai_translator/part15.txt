@@ -1,0 +1,95 @@
+  for tr in cache_results:
+            result.results.append(tr)
+            result.succeeded += 1
+        result.elapsed_sec = round(time.monotonic() - start, 2)
+        if global_tm:
+            global_tm.close()
+        return result
+
+    _log(
+        f"[Translator] Перевод {len(texts_to_translate)} строк "
+        f"(пропущено из кэша: {result.from_cache})",
+        log_callback,
+    )
+    _log(f"[Translator] Провайдер: {config.provider} / {config.get_model()}", log_callback)
+    _log(f"[Translator] Батч: {config.batch_size}, повторов: {config.max_retries}, задержка: {config.request_delay}с", log_callback)
+
+    translated_map: dict[int, str] = {}
+
+    # BUG FIX #1: при max_workers>1 все батчи сабмитятся до завершения первого,
+    # поэтому translation_history была пуста при отправке — история не работала.
+    # Скользящее окно контекста работает ТОЛЬКО при max_workers=1.
+    use_sliding_history = config.use_context and config.max_workers == 1
+    translation_history: list[tuple[str, str]] = []
+
+    import threading
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    lock = threading.Lock()
+    done_count = 0
+    total_to_do = len(texts_to_translate)
+
+    # Строим батчи с контекстом заранее
+    batches = []
+    for batch_start in range(0, total_to_do, config.batch_size):
+        batch = texts_to_translate[batch_start:batch_start + config.batch_size]
+        indices = to_translate_indices[batch_start:batch_start + config.batch_size]
+        batch_ctx: list[str] | None = None
+        if config.use_context and contexts:
+            batch_ctx = []
+            for idx, text in zip(indices, batch):
+                ctx = contexts[idx] if idx < len(contexts) else ""
+                batch_ctx.append(_format_line_with_context(text, ctx) if ctx else text)
+        batches.append((batch_start, batch, indices, batch_ctx))
+
+    _log(
+        f"[Translator] Подготовлено {len(batches)} батчей."
+        f" Параллельных потоков: {config.max_workers}",
+        log_callback,
+    )
+
+    if config.max_workers == 1:
+        # ── Последовательный режим: история контекста работает корректно ──
+        for b_start, batch, indices, batch_ctx in batches:
+            if cancel_event and cancel_event.is_set():
+                _log("[Translator] ⏹ Перевод прерван пользователем.", log_callback)
+                result.cancelled = True
+                break
+
+            cfg_copy = TranslatorConfig(**config.__dict__)
+            if use_sliding_history and translation_history:
+                history_lines: list[str] = []
+                for orig_h, trans_h in translation_history[-10:]:
+                    history_lines.append(f"Source: {orig_h}")
+                    history_lines.append(f"Translation: {trans_h}")
+                cfg_copy.previous_context_block = "\n".join(history_lines)
+            else:
+                cfg_copy.previous_context_block = ""
+
+            try:
+                success, translated_batch = _do_translate_batch(
+                    provider, batch_ctx if batch_ctx else batch,
+                    cfg_copy, log_callback, cancel_event,
+                )
+            except Exception as e:
+                success = False
+                translated_batch = [""] * len(batch)
+                _log(f"  ✗ Ошибка батча {b_start}: {e}", log_callback)
+
+            translated_batch = _validate_and_repair_batch(batch, translated_batch, log_callback, config.game_type)
+
+            # ── Retry строк с потерянными кодами (batch_size=1) ──
+            # Корень проблемы: если AI потерял §N§ при большом батче — повторяем
+            # эту строку отдельно (batch_size=1). Один вызов = максимум внимания AI.
+            if success:
+                # BUG FIX (P0-10/P0-11, внешний аудит, подтверждено чтением
+                # кода): условие ниже раньше требовало truthy `trans` —
+                # значит строка, для которой _parse_numbered() не нашла свой
+                # номер в ответе модели (пропущенный [N] в неполном/
+                # повреждённом нумерованном ответе — например есть [1] и [3],
+                # но нет [2]), получала translated_batch[i] == "" и НИКОГДА
+                # не попадала в этот же per-line retry, которым уже чинятся
+                # потерянные коды. Общий batch-retry срабатывает только при
+                # >50% пустых (см. _do_translate_batch) — то есть batch из 10
+                # строк с 1-4 пропущенными проходил как "успешный" без
+                # единой по

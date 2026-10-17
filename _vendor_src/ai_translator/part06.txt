@@ -1,0 +1,98 @@
+t hints (Speaker: Name) etc.
+        trans = _strip_context_hint(trans)
+        result[i] = trans
+        # 3. Log if codes were lost (for user awareness — no auto-repair)
+        if not _validate_engine_tokens(orig, trans, game_type):
+            missing_codes += 1
+    if missing_codes:
+        _log(
+            f"  ⚠ Escape-коды не сохранены в {missing_codes}/{len(originals)} строках"
+            " — уменьшите batch_size или проверьте вручную",
+            log_callback,
+        )
+    return result
+
+
+
+def _build_batch_prompt(texts: list[str], protected_texts: list[str],
+                        source_lang: str, target_lang: str) -> str:
+    """Build the numbered translation request prompt.
+
+    If any protected text contains §N§ placeholders, appends an explicit
+    one-line reminder so the AI never drops or reformats them.
+    """
+    numbered = "\n".join(f"[{i+1}] {t}" for i, t in enumerate(protected_texts))
+    prompt = (
+        f"Translate exactly {len(texts)} lines from {source_lang} to {target_lang}.\n"
+        "Return ONLY numbered translations [1], [2], ... [N]. No other text.\n"
+    )
+    # Add §N§ reminder only when placeholders are actually present
+    if any("§" in t for t in protected_texts):
+        prompt += "Copy every §N§ token (§0§, §1§, …) EXACTLY to the same position.\n"
+    prompt += "\n" + numbered
+    return prompt
+
+
+def _protect_pairs_for_polish(
+    pairs: list[tuple[str, str]], game_type: str = "unknown"
+) -> tuple[list[tuple[str, str]], list[dict[str, str]]]:
+    """Защитить коды в ОРИГИНАЛАХ обычным способом (_protect_codes), и той же
+    картой плейсхолдеров защитить коды в ЧЕРНОВИКАХ.
+
+    Полировка вызывается только для пар, уже прошедших _validate_codes
+    (см. polish_texts), т.е. набор и порядок кодов в original и draft
+    совпадают — поэтому можно переиспользовать ОДНУ карту §N§ → код для
+    обеих строк, заменяя в черновике каждый код на его плейсхолдер по
+    порядку появления (первое ещё не занятое вхождение).
+    """
+    protected_pairs: list[tuple[str, str]] = []
+    all_placeholders: list[dict[str, str]] = []
+    for original, draft in pairs:
+        protected_original, placeholders = _protect_codes(original, game_type)
+        protected_draft = draft
+        for key, code in placeholders.items():
+            protected_draft = protected_draft.replace(code, key, 1)
+        protected_pairs.append((protected_original, protected_draft))
+        all_placeholders.append(placeholders)
+    return protected_pairs, all_placeholders
+
+
+def _build_polish_prompt(
+    pairs: list[tuple[str, str]],
+    protected_pairs: list[tuple[str, str]],
+    target_lang: str,
+) -> str:
+    """Собрать промпт полировки: пронумерованные пары SOURCE/DRAFT."""
+    blocks = [
+        f"[{i}]\nSOURCE: {orig}\nDRAFT: {draft}"
+        for i, (orig, draft) in enumerate(protected_pairs, start=1)
+    ]
+    prompt = (
+        f"Below are {len(pairs)} SOURCE/DRAFT pairs. DRAFT is a translation into {target_lang}.\n"
+        f"Improve each DRAFT for natural, fluent {target_lang} while keeping SOURCE's exact meaning and tone.\n"
+        "If a DRAFT is already natural and accurate, return it completely UNCHANGED.\n"
+        "Return ONLY numbered improved translations [1], [2], ... [N]. No other text.\n"
+    )
+    if any("§" in o or "§" in d for o, d in protected_pairs):
+        prompt += "Copy every §N§ token (§0§, §1§, …) EXACTLY to the same relative position.\n"
+    prompt += "\n" + "\n\n".join(blocks)
+    return prompt
+
+
+def _parse_numbered(raw: str, expected: int) -> list[str]:
+    """
+    Разобрать пронумерованный ответ [1] text\n[2] text...
+    С несколькими уровнями fallback.
+    """
+    # Clean model artifacts: think blocks, markdown bold, trailing notes
+    raw = _clean_translation(raw)
+    
+    results = [""] * expected
+    if expected == 0:
+        return results
+
+    # Попытка 1: построчный [N] формат с поддержкой multi-line значений
+    lines = raw.split("\n")
+    current_idx: int | None = None
+    current_lines: list[str] = []
+    found_any =

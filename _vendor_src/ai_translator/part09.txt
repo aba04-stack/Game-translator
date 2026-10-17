@@ -1,0 +1,103 @@
+      except (ValueError, AttributeError):
+                raw = ""
+        else:
+            model = self._genai_legacy.GenerativeModel(
+                model_name=self.config.get_model(),
+                system_instruction=self.config.get_polish_system_prompt(),
+                generation_config=self._genai_legacy.GenerationConfig(
+                    temperature=self.config.temperature,
+                    max_output_tokens=self.config.max_tokens,
+                ),
+            )
+            try:
+                resp = model.generate_content(prompt)
+                raw = resp.text or ""
+            except Exception:
+                raw = ""
+
+        parsed = _parse_numbered(raw, len(pairs))
+        return [_restore_codes(t, ph) for t, ph in zip(parsed, all_placeholders)]
+
+
+class ClaudeProvider:
+    def __init__(self, config: TranslatorConfig):
+        self.config = config
+        try:
+            import anthropic
+            self._client = anthropic.Anthropic(api_key=config.api_key, timeout=config.timeout)
+        except ImportError:
+            raise RuntimeError("anthropic не установлен: pip install anthropic")
+
+    def translate_batch(self, texts: list[str], log_cb=None) -> list[str]:
+        client = self._client
+
+        protected_texts, all_placeholders = _protect_texts(texts, self.config.game_type)
+
+        prompt = _build_batch_prompt(
+            texts, protected_texts,
+            self.config.source_lang, self.config.target_lang,
+        )
+
+        _log(f"  [Claude] {len(texts)} строк → {self.config.get_model()}", log_cb)
+
+        msg = client.messages.create(
+            model=self.config.get_model(),
+            max_tokens=self.config.max_tokens,
+            # BUG FIX: temperature was missing — all other providers pass it
+            temperature=self.config.temperature,
+            system=self.config.get_system_prompt(),
+            messages=[{"role": "user", "content": prompt}],
+        )
+        # BUG FIX: content[0].text raises AttributeError if the API returns a
+        # non-text block (e.g. tool_use). Iterate and pick the first text block.
+        raw = next((b.text for b in msg.content if hasattr(b, "text") and b.text), "")
+        parsed = _parse_numbered(raw, len(texts))
+        return [_restore_codes(t, ph) for t, ph in zip(parsed, all_placeholders)]
+
+    def polish_batch(self, pairs: list[tuple[str, str]], log_cb=None) -> list[str]:
+        client = self._client
+        protected_pairs, all_placeholders = _protect_pairs_for_polish(pairs, self.config.game_type)
+        prompt = _build_polish_prompt(pairs, protected_pairs, self.config.target_lang)
+        _log(f"  [Claude/Polish] {len(pairs)} строк → {self.config.get_model()}", log_cb)
+        msg = client.messages.create(
+            model=self.config.get_model(),
+            max_tokens=self.config.max_tokens,
+            temperature=self.config.temperature,
+            system=self.config.get_polish_system_prompt(),
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = next((b.text for b in msg.content if hasattr(b, "text") and b.text), "")
+        parsed = _parse_numbered(raw, len(pairs))
+        return [_restore_codes(t, ph) for t, ph in zip(parsed, all_placeholders)]
+
+
+class GroqProvider:
+    """Groq — бесплатный, быстрый (Llama, Mixtral)."""
+    def __init__(self, config: TranslatorConfig):
+        self.config = config
+        try:
+            from openai import OpenAI
+            self._client = OpenAI(
+                api_key=config.api_key,
+                base_url="https://api.groq.com/openai/v1",
+                timeout=config.timeout,
+            )
+        except ImportError:
+            raise RuntimeError("openai не установлен: pip install openai")
+
+    def translate_batch(self, texts: list[str], log_cb=None) -> list[str]:
+        client = self._client
+        protected_texts, all_placeholders = _protect_texts(texts, self.config.game_type)
+        user_prompt = _build_batch_prompt(
+            texts, protected_texts,
+            self.config.source_lang, self.config.target_lang,
+        )
+        _log(f"  [Groq] {len(texts)} строк → {self.config.get_model()}", log_cb)
+        resp = client.chat.completions.create(
+            model=self.config.get_model(),
+            messages=[
+                {"role": "system", "content": self.config.get_system_prompt()},
+                {"role": "user",   "content": user_prompt},
+            ],
+            temperature=self.config.temperature,
+            max_tokens=se

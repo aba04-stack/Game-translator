@@ -1,0 +1,103 @@
+urn cls(config)
+
+
+# Метки типов для контекста
+
+# ── Режимы качества ──────────────────────────────────────────────────────────
+
+QUALITY_MODES = {
+    "fast": {
+        "label": "⚡ Быстрый (дешевле)",
+        "models": {"openai":"gpt-4o-mini","gemini":"gemini-2.0-flash",
+                   "claude":"claude-3-5-haiku-latest","groq":"llama-3.1-8b-instant","deepseek":"deepseek-chat"},
+        "batch_size": 25, "temperature": 0.3, "use_context": False,
+        "description": "Максимальная скорость, минимальная стоимость.",
+    },
+    "balanced": {
+        "label": "⚖️ Сбалансированный (рекомендуется)",
+        "models": {"openai":"gpt-4o-mini","gemini":"gemini-2.0-flash",
+                   "claude":"claude-3-5-haiku-latest","groq":"llama-3.1-70b-versatile","deepseek":"deepseek-chat"},
+        "batch_size": 20, "temperature": 0.2, "use_context": True,
+        "description": "Оптимальное соотношение качества и стоимости.",
+    },
+    "quality": {
+        "label": "💎 Высокое качество",
+        "models": {"openai":"gpt-4o","gemini":"gemini-1.5-pro",
+                   "claude":"claude-3-5-sonnet-latest","groq":"llama-3.3-70b-versatile","deepseek":"deepseek-chat"},
+        "batch_size": 10, "temperature": 0.1, "use_context": True,
+        "description": "Максимальное качество перевода. Медленнее и дороже.",
+    },
+}
+
+_COST_PER_1K_TOKENS = {
+    "gpt-4o-mini": 0.0003, "gpt-4o": 0.010,
+    "gemini-2.0-flash": 0.0, "gemini-1.5-pro": 0.005,
+    "claude-3-5-haiku-latest": 0.001, "claude-3-5-sonnet-latest": 0.012,
+    "llama-3.1-8b-instant": 0.0, "llama-3.1-70b-versatile": 0.0, "llama-3.3-70b-versatile": 0.0,
+    "deepseek-chat": 0.0003,
+}
+
+
+def estimate_cost(texts: list[str], model: str) -> tuple[int, float]:
+    """Оценить стоимость перевода. (токенов, USD)"""
+    chars = sum(len(t) for t in texts)
+    tokens = int(chars / 1.5) * 2   # input+output, японский ~1.5 символа/токен
+    cost = (tokens / 1000) * _COST_PER_1K_TOKENS.get(model, 0.001)
+    return tokens, cost
+
+
+_CTX_LABELS: dict[str, str] = {
+    # ── RPG Maker MV / MZ ──────────────────────────────────────
+    "dialog_text":    "Dialog",
+    "speaker_name":   "Speaker name",
+    "choice":         "Choice option",
+    "narrator":       "Narration",
+    "scroll_text":    "Scrolling text",
+    "actor_name":     "Character name",
+    "item":           "Item name",
+    "skill":          "Skill name",
+    "map_name":       "Location name",
+    "class_name":     "Class name",
+    "weapon_name":    "Weapon name",
+    "armor_name":     "Armor name",
+    "enemy_name":     "Enemy name",
+    "state_name":     "Status effect name",
+    "tileset_name":   "Tileset name",
+    "common_event":   "Common event text",
+    # ── Wolf RPG ────────────────────────────────────────────────
+    "wolf_dialog":    "Dialog",
+    "wolf_choice":    "Choice option",
+    "wolf_string":    "Game text",
+    # ── RPG Maker VX Ace ───────────────────────────────────────
+    "vxace_dialog":   "Dialog",
+    "vxace_choice":   "Choice option",
+    "vxace_name":     "Character name",
+    "vxace_string":   "Game text",
+    # ── Kirikiri / KAG ──────────────────────────────────────────
+    "kirikiri_text":  "Dialog",
+    "kirikiri_choice":"Choice option",
+    # ── Ren'Py ──────────────────────────────────────────────────
+    "renpy_say":      "Dialog",
+    "renpy_narrator": "Narration",
+    "renpy_menu":     "Choice option",
+    "renpy_string":   "UI text",
+    # ── TyranoScript ────────────────────────────────────────────
+    "tyrano_dialog":  "Dialog",
+    "tyrano_choice":  "Choice option",
+    "dialog":         "Dialog",   # generic fallback used by tyrano
+    # ── Godot Engine ────────────────────────────────────────────
+    "godot_text":     "UI text",
+    "godot_dialog":   "Dialog",
+    "godot_dialog_choice":    "Choice option",
+    "godot_dialog_narration": "Narration",
+    "godot_script":   "Game text",
+    "godot_bbcode_text": "UI text",
+    # ── Unity ───────────────────────────────────────────────────
+    # BUG FIX: unity_extractor.py produces six distinct context values
+    # (unity_text/unity_json/unity_csv/unity_xml/unity_po/unity_yaml — see
+    # TEXT_EXTS and the per-format _extract_* functions there), but only
+    # three had labels here. The other three fell through
+    # _format_line_with_context()'s fallback chain (it reads this dict
+    # directly via _CTX_LABELS.get(ctx, "")) to the raw context string
+    # itself (e.g. "unity_xml"), which isn't a crash but is a useless hint
+    # in the transl

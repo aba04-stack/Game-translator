@@ -1,0 +1,106 @@
+c* / ***both***
+_MD_CODE_RE      = re.compile(r"`([^`]*)`")              # `inline code`
+_COMMENTARY_START_RE = re.compile(
+    r"^(Note[:\s]|Translation[:\s]|Примечание[:\s]|"
+    r"Here\s+(?:is|are)\b|I\s+(?:translated|used)\b|This\s+(?:is|means)\b|"
+    r"Translator'?s?\s+note|Above|Additionally|—\s*Note)",
+    re.IGNORECASE,
+)
+# _parse_numbered: formats produced by AI instead of the requested [N] brackets
+_NUM_BRACKET_RE  = re.compile(r"^\[(\d+)\]\s*(.*)")        # [1] text
+_NUM_LIST_RE     = re.compile(r"^(\d+)[.)]\s+(.*)")         # 1. text  /  1) text
+_NUM_PREFIX_RE   = re.compile(r"^(?:\[\d+\]\s*|\d+[.)]\s+)")  # strip either prefix
+# AI sometimes writes § О § (Cyrillic О) or § 0 § (spaces) — normalize all variants
+# Covers: §\s*[0-9О0Ο]+\s*§ where О is Cyrillic, 0 is fullwidth, Ο is Greek
+_PLACEHOLDER_FUZZY_RE = re.compile(
+    r"§\s*([0-9\uff10-\uff19]+|[О0Ο]+|\d+)\s*§",
+    re.UNICODE,
+)
+# Digit normalization map for fullwidth/look-alike chars
+_DIGIT_MAP = str.maketrans("０１２３４５６７８９ОοΟ", "0123456789000")
+
+
+def _normalize_placeholders(text: str) -> str:
+    """Normalize §N§ look-alike variants AI might produce:
+    §0§, § 0 §, §０§, §О§(Cyrillic), §Ο§(Greek) → §0§"""
+    def _fix(m: re.Match) -> str:
+        raw = m.group(1).translate(_DIGIT_MAP)
+        digits = re.sub(r"[^0-9]", "", raw)
+        return f"§{digits}§" if digits else m.group(0)
+    return _PLACEHOLDER_FUZZY_RE.sub(_fix, text)
+
+
+def _clean_translation(text: str) -> str:
+    """Remove model artifacts from a single translated string:
+    - <think>…</think> blocks (DeepSeek-R1, Qwen3)
+    - Markdown bold/italic/code (DeepSeek-chat, GPT-4o sometimes)
+    - Trailing commentary lines the model appended after the translation
+    - Normalize §N§ look-alikes (§ 0 §, §О§, §０§ → §0§)
+    """
+    # 0. Normalize §N§ variants BEFORE any other processing
+    text = _normalize_placeholders(text)
+    # 1. Strip think blocks
+    text = _THINK_RE.sub("", text)
+    # 2. Strip markdown formatting but keep inner text
+    text = _MD_BOLD_RE.sub(r"\1", text)
+    text = _MD_CODE_RE.sub(r"\1", text)
+    # 3. Trim trailing commentary (model sometimes explains its translation)
+    lines = text.split("\n")
+    clean: list[str] = []
+    for line in lines:
+        if _COMMENTARY_START_RE.match(line.strip()):
+            break
+        clean.append(line)
+    return "\n".join(clean).strip()
+
+
+@dataclass
+class TranslatorConfig:
+    provider: str = "openai"
+    api_key: str = ""
+    model: str = ""
+    source_lang: str = "Japanese"
+    target_lang: str = "Russian"
+    batch_size: int = 25
+    max_workers: int = 3  # Количество параллельных потоков
+    max_retries: int = 3
+    retry_delay: float = 2.0
+    request_delay: float = 0.5
+    temperature: float = 0.2
+    max_tokens: int = 4096
+    timeout: int = 60
+    glossary_block: str = ""
+    extra_instructions: str = ""
+    use_context: bool = True
+    previous_context_block: str = ""  # Для скользящего окна контекста
+    base_url: str = ""  # Custom endpoint (LM Studio, Ollama, etc.)
+    use_global_tm: bool = True  # Кросс-проектная Translation Memory
+    game_type: str = "unknown"
+    style_profile: str = ""
+
+    def get_engine_instructions(self) -> str:
+        try:
+            from engine.translation_profiles import build_instructions
+            return build_instructions(self.game_type, self.style_profile)
+        except Exception:
+            return "ENGINE PROFILE: unknown\nPreserve all game structure, tags, placeholders, IDs and code; translate only human-readable text."
+
+    def get_model(self) -> str:
+        defaults = {
+            "openai":   "gpt-4o-mini",
+            "gemini":   "gemini-2.0-flash",
+            "claude":   "claude-3-5-haiku-latest",
+            "groq":     "llama-3.1-8b-instant",
+            "deepseek": "deepseek-chat",
+        }
+        return self.model or defaults.get(self.provider, "gpt-4o-mini")
+
+    def get_system_prompt(self) -> str:
+        parts = [
+            "You are a professional translator specializing in Japanese video games.",
+            f"Translate from {self.source_lang} to {self.target_lang}.",
+            "",
+            "CRITICAL RULES — follow every rule exactly or the game will break:",
+            r"1. §N§ tokens (§0§, §1§, §2§ …) are PROTECTED GAME CODES."
+            r" Copy each one EXACTLY to the same relative position in the translation."
+            r" NEVER translate, rename, spli

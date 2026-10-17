@@ -1,0 +1,130 @@
+ик (before) → предложенный
+    вариант (after). changed=False, если модель сочла черновик уже
+    естественным и вернула его без изменений (или если правка была
+    отклонена валидацией кодов и мы безопасно откатились к черновику)."""
+    original: str
+    before: str
+    after: str
+    changed: bool
+    success: bool
+
+
+@dataclass
+class PolishBatchResult:
+    results: list[PolishResult] = field(default_factory=list)
+    total: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    changed: int = 0
+    skipped: int = 0  # исключены из полировки (пустой черновик / уже битые коды)
+    elapsed_sec: float = 0.0
+    cancelled: bool = False
+
+
+def _protect_codes(text: str, game_type: str = "unknown") -> tuple[str, dict[str, str]]:
+    """Protect engine syntax before AI translation and restore it afterwards."""
+    placeholders: dict[str, str] = {}
+    counter = [0]
+
+    def replace(m: re.Match) -> str:
+        key = f"{PLACEHOLDER_PREFIX}{counter[0]}{PLACEHOLDER_SUFFIX}"
+        placeholders[key] = m.group(0)
+        counter[0] += 1
+        return key
+
+    # Always protect RPG codes first; then engine-specific tokens.
+    protected = RPG_CODE_PATTERN.sub(replace, text)
+    pattern = _engine_token_pattern(game_type)
+    if pattern:
+        protected = pattern.sub(replace, protected)
+    return protected, placeholders
+
+
+def _restore_codes(text: str, placeholders: dict[str, str]) -> str:
+    """Восстановить RPG Maker коды из плейсхолдеров §N§.
+
+    AI иногда разбивает §N§ переносом строки (§0\\n§ или §0 \\n§).
+    Исправляем до основного поиска, иначе ключ не найдётся → коды теряются.
+    """
+    if not placeholders:
+        return text
+    # Heal split placeholders: "§0\n§" → "§0§"  (AI line-wrapped the token)
+    text = _SPLIT_PLACEHOLDER_RE.sub(r"§\1§", text)
+    for key, original in placeholders.items():
+        text = text.replace(key, original)
+    return text
+
+
+
+def _extract_codes(text: str) -> list[str]:
+    """Извлечь все RPG Maker коды из текста."""
+    return [m.group(0) for m in RPG_CODE_PATTERN.finditer(text)]
+
+
+def _strip_codes(text: str) -> str:
+    """Удалить все RPG Maker коды, оставив только текст."""
+    return RPG_CODE_PATTERN.sub("", text)
+
+
+def _split_code_tokens(text: str) -> list[tuple[str, str]]:
+    """Разбить строку на токены вида ('text'|'code', значение)."""
+    tokens: list[tuple[str, str]] = []
+    last = 0
+    for match in RPG_CODE_PATTERN.finditer(text):
+        if match.start() > last:
+            tokens.append(("text", text[last:match.start()]))
+        tokens.append(("code", match.group(0)))
+        last = match.end()
+    if last < len(text):
+        tokens.append(("text", text[last:]))
+    return tokens
+
+
+def _snap_to_word_boundary(text: str, pos: int, min_pos: int, max_pos: int) -> int:
+    """Сдвинуть позицию разреза к ближайшему пробелу в пределах [min_pos, max_pos].
+
+    Возвращает pos без изменений, если рядом нет пробела в допустимых
+    границах (например, текст на языке без пробелов между словами, или
+    просто одно длинное слово) — резать по границе тогда нечем, и старое
+    посимвольное поведение — единственный вариант.
+    """
+    if pos <= min_pos or pos >= max_pos:
+        return pos
+    if text[pos - 1].isspace() or text[pos].isspace():
+        return pos  # уже на границе слова
+
+    best = None
+    best_dist = None
+    for i in range(pos, max_pos):
+        if text[i].isspace():
+            best, best_dist = i + 1, i - pos
+            break
+    for i in range(pos - 1, min_pos - 1, -1):
+        if text[i].isspace():
+            dist = pos - i
+            if best_dist is None or dist < best_dist:
+                best = i + 1
+            break
+
+    return best if best is not None else pos
+
+
+def _split_text_by_weights(text: str, weights: list[int]) -> list[str]:
+    """Разделить текст на N частей, сохраняя примерно исходные пропорции.
+
+    BUG FIX: раньше резало строго по пропорции символов, из-за чего код,
+    восстанавливаемый _build_translation_with_original_codes, мог оказаться
+    посередине слова перевода (например "героя" -> "ге" + код + "роя" —
+    цвет/эффект переключался внутри слова). Теперь после расчёта позиции по
+    пропорции ищем ближайший пробел рядом и режем по нему — код встаёт между
+    словами. Если пробелов рядом нет — используем прежнюю посимвольную
+    позицию (например для языков без пробелов между словами).
+    """
+    parts_count = len(weights)
+    if parts_count <= 1:
+        return [text]
+
+    if not text:
+        return [""] * parts_count
+
+    safe_we

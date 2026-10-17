@@ -1,0 +1,122 @@
+ation prompt.
+    "unity_text":     "UI text",
+    "unity_json":     "Game text",
+    "unity_csv":      "Game text",
+    "unity_xml":      "Game text",
+    "unity_po":       "UI text",
+    "unity_yaml":     "Game text",
+}
+
+
+_CTX_HINT_RE = re.compile(r"^\s*\([^)]{1,80}\)\s*")
+
+# Паттерны для извлечения server-specified retry-delay из текста ошибки.
+# Используется как fallback когда у исключения нет .response.headers (Gemini SDK,
+# некоторые обёртки) — большинство API всё равно упоминают точное время в message.
+_RETRY_AFTER_TEXT_PATTERNS = [
+    re.compile(r"retry[- ]after[:\s]+(\d+(?:\.\d+)?)", re.IGNORECASE),
+    re.compile(r"try again in (\d+(?:\.\d+)?)\s*s", re.IGNORECASE),
+    re.compile(r"retry in (\d+(?:\.\d+)?)\s*s", re.IGNORECASE),
+    re.compile(r"please wait (\d+(?:\.\d+)?)\s*s", re.IGNORECASE),
+]
+
+
+def _extract_retry_after(exc: Exception) -> float | None:
+    """
+    Извлечь server-specified задержку перед retry из исключения API.
+
+    Приоритет:
+      1. HTTP заголовок Retry-After (OpenAI/Anthropic/Groq/DeepSeek SDK — все
+         основаны на httpx и пробрасывают .response.headers на RateLimitError).
+      2. Текст сообщения об ошибке — Gemini и некоторые другие API не дают
+         доступа к заголовкам напрямую, но указывают точное время в message
+         (например "Please retry in 20.5s").
+
+    Возвращает None если ни один способ не сработал — вызывающий код тогда
+    использует свою экспоненциальную эвристику задержки.
+    """
+    # 1. HTTP-заголовок (httpx.Response, как у OpenAI/Anthropic/Groq SDK)
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None) if response is not None else None
+    if headers is not None:
+        for key in ("retry-after", "Retry-After", "x-ratelimit-reset-requests"):
+            val = None
+            try:
+                val = headers.get(key)
+            except Exception:
+                pass
+            if val:
+                try:
+                    return max(0.0, float(val))
+                except (TypeError, ValueError):
+                    pass
+
+    # 2. Парсинг из текста сообщения (Gemini и другие)
+    msg = str(exc)
+    for pat in _RETRY_AFTER_TEXT_PATTERNS:
+        m = pat.search(msg)
+        if m:
+            try:
+                return max(0.0, float(m.group(1)))
+            except (TypeError, ValueError):
+                pass
+    return None
+
+
+def _ctx_label(ctx: str) -> str:
+    """Получить человекочитаемую метку для context-значения (с prefix-matching)."""
+    if ctx in _CTX_LABELS:
+        return _CTX_LABELS[ctx]
+    if ctx.startswith(("dialog:", "say:")):
+        return "Dialog"
+    if ":" in ctx:
+        cat, _, field = ctx.partition(":")
+        return f"{cat.capitalize()} {field}"
+    if ctx.isalpha() and ctx.islower():
+        return "Dialog"   # RenPy char variable
+    return ctx
+
+
+def _format_line_with_context(text: str, ctx: str, speaker: str = "") -> str:
+    """Форматировать строку с контекстом для AI-промпта.
+
+    Обрабатывает все форматы context-значений от всех движков:
+      - "dialog:Alice"    → Kirikiri (имя говорящего)
+      - "say:Alice"       → Tyrano, Godot
+      - "alice"           → RenPy (переменная персонажа = имя)
+      - "actor:name"      → VXAce data field
+      - "dialog_text"     → MV/MZ dialog
+      - "choice"          → выбор
+      - "narrator"        → нарратив без имени
+      - "godot_script"    → GDScript tr()
+    """
+    parts: list[str] = []
+    _NOT_SPEAKER = frozenset({"narrator", "choice", "dialog", "menu", "narration", "text"})
+
+    # Явный speaker > контекст
+    if speaker:
+        parts.append(f"Speaker: {speaker}")
+
+    if not speaker:
+        if ctx.startswith(("dialog:", "say:")):
+            char = ctx.split(":", 1)[1].strip()
+            if char:
+                parts.append(f"Speaker: {char}")
+        elif ctx.isalpha() and ctx.islower() and 1 < len(ctx) <= 24 and ctx not in _NOT_SPEAKER:
+            parts.append(f"Speaker: {ctx.capitalize()}")
+        # VXAce data: "actor:name" → "Character name", "item:description" → "Item description"
+        elif ":" in ctx:
+            category, _, field = ctx.partition(":")
+            label = f"{category.capitalize()} {field}"
+            parts.append(f"Type: {label}")
+        else:
+            label = _CTX_LABELS.get(ctx, "")
+            if label and label not in ("Dialog", "Narration", "Game text"):
+                parts.append(f"Type: {label}")
+
+    if parts:
+        return f"({', '.join(parts)}) {text}"
+    return text
+
+
+def _d

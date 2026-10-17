@@ -1,0 +1,72 @@
+пытки восстановить именно эти позиции. (Не
+                # постоянная порча: state.set() ниже и так уже не кэширует
+                # пустой translated, так что при повторном Translate строка
+                # была бы взята снова — но в ТЕКУЩЕМ проходе просто
+                # оставалась непереведённой без единой попытки её вытащить.)
+                # Теперь: то же самое исправление одним и тем же retry-
+                # механизмом (batch_size=1, максимум внимания AI) — просто
+                # шире условие: retry либо на потере кодов, либо на
+                # полностью пустом результате.
+                retry_indices_local = [
+                    i for i, (orig, trans) in enumerate(zip(batch, translated_batch))
+                    if orig and (not trans or not _validate_engine_tokens(orig, trans, config.game_type))
+                ]
+                if retry_indices_local:
+                    _log(
+                        f"  🔁 Перевод {len(retry_indices_local)} строк — "
+                        f"потерянные коды или пропущенные в batch-ответе (batch=1)...",
+                        log_callback,
+                    )
+                    for li in retry_indices_local:
+                        orig_line = batch[li]
+                        if cancel_event and cancel_event.is_set():
+                            break
+                        try:
+                            # Smart retry: добавляем в extra_instructions точный список
+                            # кодов которые AI должен сохранить, чтобы он не потерял их снова.
+                            missing_codes = _extract_codes(orig_line)
+                            retry_cfg = TranslatorConfig(**cfg_copy.__dict__)
+                            if missing_codes:
+                                codes_str = " ".join(missing_codes[:8])
+                                retry_cfg.extra_instructions = (
+                                    f"CRITICAL: this line contains escape codes that MUST be preserved: {codes_str}\n"
+                                    f"Previous translation lost them. Copy each code EXACTLY to the same position.\n"
+                                    + (cfg_copy.extra_instructions or "")
+                                ).strip()
+                            ok1, r1 = _do_translate_batch(
+                                provider, [orig_line],
+                                retry_cfg, log_callback, cancel_event,
+                            )
+                            r1 = _validate_and_repair_batch([orig_line], r1, None, config.game_type)
+                            if ok1 and r1[0] and _validate_engine_tokens(orig_line, r1[0], config.game_type):
+                                translated_batch[li] = r1[0]
+                                _log(f"    ✓ Строка {li}: восстановлена через retry", log_callback)
+                            else:
+                                _log(f"    ⚠ Строка {li}: не удалось восстановить после retry — строка пропущена", log_callback)
+                                translated_batch[li] = ""  # skip broken line
+                        except Exception:
+                            translated_batch[li] = ""
+
+            for orig_idx, (original, translated) in zip(indices, zip(batch, translated_batch)):
+                final_t = translated if (success and translated) else ""
+                translated_map[orig_idx] = final_t
+                if state and success and translated and _validate_engine_tokens(original, translated, config.game_type):
+                    state.set(original, translated)
+                    if use_sliding_history:
+                        translation_history.append((original, translated))
+
+            done_count += len(batch)
+            if progress_callback:
+                batch_num = done_count // max(config.batch_size, 1)
+                progress_callback(done_count, total_to_do, -1.0, f"батч {batch_num}")
+            if state:
+                state.save_periodically(50)
+            if config.request_delay > 0:
+                # BUG FIX: plain time.sleep() here ignored cancel_event entirely —
+                # clicking Cancel during this pause (up to config.request_delay,
+                # user-configurable up to 30s) had no effect until the sleep
+                # finished. cancel_event.wait() returns immediately once the
+                # event is set, same as everywhere else cancellation is honored.
+                if cancel_event:
+                    cancel_event.wait(config.request_delay)
+    

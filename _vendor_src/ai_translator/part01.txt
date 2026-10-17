@@ -1,0 +1,91 @@
+"""
+ai_translator.py — контекстно-осведомлённый пакетный AI-переводчик.
+
+Лучшие практики от топ-инструментов:
+- Glossary injection в системный промпт (Translator++)
+- Context-aware batching: speaker + dialog вместе (SakuraTranslator)
+- Numbered response parsing с fallback (MTool)
+- Retry с экспоненциальной задержкой
+- Защита RPG Maker escape-кодов от порчи
+- Умный half-batch retry при полном сбое
+- Валидация RPG-кодов после перевода
+- Rate limiting между батчами
+- Кооперативная отмена (cancel_event)
+"""
+
+import time
+import re
+from dataclasses import dataclass, field
+from typing import Callable
+
+RPG_CODE_PATTERN = re.compile(
+    r"(?:\x1b)?\\(?:"
+    r"[NnVvCcIiGgPpTtSsFfBbRr](?:\[[^\]]*\])?"  # \N[1], \V[3], \C[2], ...
+    r"|[A-Z]{2,}(?:\[[^\]]*\])?"               # \NW[Name], \MC[...], ...
+    r"|[\\nrtbfv]"                               # \\, \n, \r, \t, \b, \f, \v
+    r"|[!.<>^{}|]"                                 # \!, \., \<, \>, \^, \{, \}, \|
+    r"|u[0-9A-Fa-f]{4}"                            # \uFFFF
+    r"|x[0-9A-Fa-f]{2}"                            # \xFF
+    r")"
+)
+
+# Engine-aware protected syntax. RPG Maker already has a dedicated parser above;
+# these additional patterns cover the formats that commonly appear in Unity,
+# Godot, Ren'Py, Tyrano/Kirikiri and localization tables. They are deliberately
+# conservative: only unmistakable formatting/interpolation tokens are protected.
+_ENGINE_TOKEN_PATTERNS = {
+    "unity": re.compile(r"(?:\{\{[^{}]+\}\}|\{[A-Za-z_][\w.]*\}|\{\d+(?::[^{}]+)?\}|\$\{[^{}]+\}|%[+#0\- ]*\d*(?:\.\d+)?[diuoxXfFeEgGcs]|</?[A-Za-z][^<>]*>|\\[nrt])"),
+    "godot": re.compile(r"(?:\{[A-Za-z_][\w.]*\}|%[sdif]|\[(?:/?(?:b|i|u|s|code|url|center|left|right|fill|indent)|color(?:=[^\]]+)?)\]|\\[nrt])"),
+    "renpy": re.compile(r"(?:\{[^{}\n]+\}|\[[A-Za-z_][\w.]*\]|\\[nrt]|\$[A-Za-z_][\w.]*)"),
+    "tyrano": re.compile(r"(?:\[[A-Za-z_][^\]]*\]|\\[A-Za-z_][\w-]*(?:\([^)]*\))?)"),
+    "kirikiri": re.compile(r"(?:\[[A-Za-z_][^\]]*\]|\\[A-Za-z_][\w-]*(?:\([^)]*\))?)"),
+    "wolf": re.compile(r"(?:\\[A-Za-z_][\w-]*(?:\[[^\]]*\])?)"),
+    "vxace": re.compile(r"(?:\\[A-Za-z][^\s]{0,20})"),
+    # BUG FIX (найдено по прямому запросу — проверить, подходит ли режим
+    # каждому движку): rpgmv/rpgmz были ЕДИНСТВЕННЫМИ из 9 движков БЕЗ
+    # записи в этом словаре. _validate_codes (отдельная, более ранняя
+    # проверка внутри _validate_engine_tokens) покрывает КЛАССИЧЕСКИЕ RPG
+    # Maker коды (\C[n], \N[n] и т.п.) — но множество популярных плагинов
+    # (Yanfly Engine Plugins, VisuStella MZ и другие, которыми пользуется
+    # огромная доля реальных MV/MZ игр) вводят СВОИ плейсхолдеры поверх
+    # движка: позиционные %1/%2 (например "Welcome, %1! You have %2 gold.")
+    # и JS-template-подобные {playerName}. Ни то, ни другое не входит в
+    # RPGMAKER_CODES — перевод, полностью потерявший такой плейсхолдер,
+    # проходил _validate_engine_tokens как валидный, эмпирически
+    # подтверждено. Добавляем тот же уровень защиты, что уже был у ВСЕХ
+    # остальных 8 движков.
+    "rpgmv": re.compile(r"(?:%\d+|\{[A-Za-z_][\w.]*\}|\\[nrt])"),
+    "rpgmz": re.compile(r"(?:%\d+|\{[A-Za-z_][\w.]*\}|\\[nrt])"),
+}
+
+
+def _engine_token_pattern(game_type: str):
+    return _ENGINE_TOKEN_PATTERNS.get((game_type or "").lower())
+
+
+def _extract_engine_tokens(text: str, game_type: str) -> list[str]:
+    """Return protected non-RPG tokens in source order."""
+    pattern = _engine_token_pattern(game_type)
+    if not pattern:
+        return []
+    return [m.group(0) for m in pattern.finditer(text)]
+
+
+def _validate_engine_tokens(original: str, translated: str, game_type: str) -> bool:
+    """Validate RPG escape codes plus engine-specific placeholders/tags."""
+    if not _validate_codes(original, translated):
+        return False
+    return _extract_engine_tokens(original, game_type) == _extract_engine_tokens(translated, game_type)
+
+# Placeholder format §N§: § (U+00A7) is not Latin/Japanese/RPG-code.
+# AI models reliably leave § untouched. 5× shorter than __RPGMTL_CODE_XXXX__.
+PLACEHOLDER_PREFIX = "§"
+PLACEHOLDER_SUFFIX = "§"
+_PLACEHOLDER_RE       = re.compile(r"§\d+§")
+# Fix AI artifacts around §N§ tokens:
+#   §0 §  §0\n§  § 0§  § 0 §  §0§  →  §0§
+_SPLIT_PLACEHOLDER_RE = re.compile(r"§\s*(\d+)\s*§")
+
+# ── Cleaning patterns for model artifacts ────────────────────────────────────
+_THINK_RE        = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)
+_MD_BOLD_RE      = re.compile(r"\*{1,3}(.+?)\*{1,3}")   # **bold** / *itali

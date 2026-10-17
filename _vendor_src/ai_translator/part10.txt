@@ -1,0 +1,99 @@
+lf.config.max_tokens,
+        )
+        raw = resp.choices[0].message.content or ""
+        parsed = _parse_numbered(raw, len(texts))
+        return [_restore_codes(t, ph) for t, ph in zip(parsed, all_placeholders)]
+
+    def polish_batch(self, pairs: list[tuple[str, str]], log_cb=None) -> list[str]:
+        client = self._client
+        protected_pairs, all_placeholders = _protect_pairs_for_polish(pairs, self.config.game_type)
+        prompt = _build_polish_prompt(pairs, protected_pairs, self.config.target_lang)
+        _log(f"  [Groq/Polish] {len(pairs)} строк → {self.config.get_model()}", log_cb)
+        resp = client.chat.completions.create(
+            model=self.config.get_model(),
+            messages=[
+                {"role": "system", "content": self.config.get_polish_system_prompt()},
+                {"role": "user",   "content": prompt},
+            ],
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens,
+        )
+        raw = resp.choices[0].message.content or ""
+        parsed = _parse_numbered(raw, len(pairs))
+        return [_restore_codes(t, ph) for t, ph in zip(parsed, all_placeholders)]
+
+
+class DeepSeekProvider:
+    """DeepSeek — дешёвый, хорошее качество."""
+    def __init__(self, config: TranslatorConfig):
+        self.config = config
+        try:
+            from openai import OpenAI
+            self._client = OpenAI(
+                api_key=config.api_key,
+                base_url="https://api.deepseek.com",
+                timeout=config.timeout,
+            )
+        except ImportError:
+            raise RuntimeError("openai не установлен: pip install openai")
+
+    def translate_batch(self, texts: list[str], log_cb=None) -> list[str]:
+        client = self._client
+        protected_texts, all_placeholders = _protect_texts(texts, self.config.game_type)
+        user_prompt = _build_batch_prompt(
+            texts, protected_texts,
+            self.config.source_lang, self.config.target_lang,
+        )
+        _log(f"  [DeepSeek] {len(texts)} строк → {self.config.get_model()}", log_cb)
+        resp = client.chat.completions.create(
+            model=self.config.get_model(),
+            messages=[
+                {"role": "system", "content": self.config.get_system_prompt()},
+                {"role": "user",   "content": user_prompt},
+            ],
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens,
+        )
+        raw = resp.choices[0].message.content or ""
+        parsed = _parse_numbered(raw, len(texts))
+        return [_restore_codes(t, ph) for t, ph in zip(parsed, all_placeholders)]
+
+    def polish_batch(self, pairs: list[tuple[str, str]], log_cb=None) -> list[str]:
+        client = self._client
+        protected_pairs, all_placeholders = _protect_pairs_for_polish(pairs, self.config.game_type)
+        prompt = _build_polish_prompt(pairs, protected_pairs, self.config.target_lang)
+        _log(f"  [DeepSeek/Polish] {len(pairs)} строк → {self.config.get_model()}", log_cb)
+        resp = client.chat.completions.create(
+            model=self.config.get_model(),
+            messages=[
+                {"role": "system", "content": self.config.get_polish_system_prompt()},
+                {"role": "user",   "content": prompt},
+            ],
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens,
+        )
+        raw = resp.choices[0].message.content or ""
+        parsed = _parse_numbered(raw, len(pairs))
+        return [_restore_codes(t, ph) for t, ph in zip(parsed, all_placeholders)]
+
+
+def _get_provider(config: TranslatorConfig):
+    providers = {
+        "openai":   OpenAIProvider,
+        "gemini":   GeminiProvider,
+        "claude":   ClaudeProvider,
+        "groq":     GroqProvider,
+        "deepseek": DeepSeekProvider,
+    }
+    cls = providers.get(config.provider.lower())
+    if not cls:
+        # BUG FIX: "custom" provider selected in UI → use OpenAIProvider with base_url.
+        # Previously caused ValueError crash; now gracefully falls back to OpenAI-compatible.
+        if config.provider.lower() == "custom":
+            if not config.base_url:
+                raise ValueError(
+                    "Для провайдера 'custom' необходимо указать Custom URL (LM Studio, Ollama и т.д.)"
+                )
+            return OpenAIProvider(config)
+        raise ValueError(f"Неизвестный провайдер: {config.provider!r}. Допустимые: {list(providers) + ['custom']}")
+    ret

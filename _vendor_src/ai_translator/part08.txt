@@ -1,0 +1,78 @@
+f.config.get_model(),
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens,
+            messages=[
+                {"role": "system", "content": self.config.get_polish_system_prompt()},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        raw = resp.choices[0].message.content or ""
+        parsed = _parse_numbered(raw, len(pairs))
+        return [_restore_codes(t, ph) for t, ph in zip(parsed, all_placeholders)]
+
+
+class GeminiProvider:
+    def __init__(self, config: TranslatorConfig):
+        self.config = config
+        self._use_new_sdk = False
+        try:
+            from google import genai  # google-genai >= 1.0
+            self._client = genai.Client(api_key=config.api_key)
+            self._use_new_sdk = True
+            # Cache types and HttpOptions once — used in every translate_batch call
+            from google.genai import types as _genai_types
+            self._genai_types = _genai_types
+            try:
+                from google.genai.types import HttpOptions as _HO
+                self._http_opts = _HO(timeout=config.timeout)
+            except (ImportError, TypeError):
+                self._http_opts = {"timeout": config.timeout}
+        except (ImportError, AttributeError):
+            try:
+                import google.generativeai as genai  # google-generativeai (legacy)
+                genai.configure(api_key=config.api_key)
+                self._genai_legacy = genai
+                self._use_new_sdk = False
+            except ImportError:
+                raise RuntimeError(
+                    "Gemini SDK не установлен. Установите: pip install google-genai  "
+                    "(или pip install google-generativeai для старой версии)"
+                )
+
+    def translate_batch(self, texts: list[str], log_cb=None) -> list[str]:
+        protected_texts, all_placeholders = _protect_texts(texts, self.config.game_type)
+        prompt = _build_batch_prompt(
+            texts, protected_texts,
+            self.config.source_lang, self.config.target_lang,
+        )
+        _log(f"  [Gemini] {len(texts)} строк → {self.config.get_model()}", log_cb)
+
+        if self._use_new_sdk:
+            resp = self._client.models.generate_content(
+                model=self.config.get_model(),
+                contents=prompt,
+                config=self._genai_types.GenerateContentConfig(
+                    system_instruction=self.config.get_system_prompt(),
+                    temperature=self.config.temperature,
+                    max_output_tokens=self.config.max_tokens,
+                    http_options=self._http_opts,
+                ),
+            )
+            try:
+                raw = resp.text or ""
+            except (ValueError, AttributeError):
+                raw = ""
+        else:
+            # Legacy google-generativeai SDK
+            model = self._genai_legacy.GenerativeModel(
+                model_name=self.config.get_model(),
+                system_instruction=self.config.get_system_prompt(),
+                generation_config=self._genai_legacy.GenerationConfig(
+                    temperature=self.config.temperature,
+                    max_output_tokens=self.config.max_tokens,
+                ),
+            )
+            try:
+                resp = model.generate_content(prompt)
+                raw = resp.text or ""
+      

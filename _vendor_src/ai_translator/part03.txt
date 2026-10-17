@@ -1,0 +1,42 @@
+t, or delete them."
+            r" Wrong: '§ 0 §'  '§0 §'  '§О§' (Cyrillic O).  Correct: '§0§'.",
+            "2. Output ONLY the improved translation. No commentary, notes, markdown bold (**), or explanations.",
+            "3. Do NOT translate proper nouns listed in the glossary.",
+            "4. Match the register and tone (casual speech, formal, dramatic, etc.).",
+            "5. Keep character speech styles consistent across all lines.",
+            "6. Preserve every engine-specific token and syntax exactly as specified by the engine profile.",
+        ]
+        parts.append("")
+        parts.append(self.get_engine_instructions())
+        if self.glossary_block:
+            parts.append("")
+            parts.append(self.glossary_block)
+        if self.extra_instructions:
+            parts.append("")
+            parts.append(self.extra_instructions)
+        return "\n".join(parts)
+
+
+@dataclass
+class TranslationResult:
+    original: str
+    translated: str
+    success: bool
+    error: str = ""
+    from_cache: bool = False
+
+
+@dataclass
+class BatchResult:
+    results: list[TranslationResult] = field(default_factory=list)
+    total: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    from_cache: int = 0
+    elapsed_sec: float = 0.0
+    cancelled: bool = False
+
+
+@dataclass
+class PolishResult:
+    """Результат полировки одной строки: чернов

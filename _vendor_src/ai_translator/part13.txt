@@ -1,0 +1,100 @@
+o_translate_batch(
+    provider,
+    texts: list[str],
+    config: TranslatorConfig,
+    log_cb: Callable[[str], None] | None,
+    cancel_event=None,
+) -> tuple[bool, list[str]]:
+    """
+    Переводит батч с retry. При полном провале делит пополам и пробует снова.
+    Возвращает (success, translations).
+    cancel_event используется для прерываемого ожидания между попытками.
+    """
+    delay = config.retry_delay
+
+    for attempt in range(1, config.max_retries + 1):
+        if cancel_event and cancel_event.is_set():
+            return False, [""] * len(texts)
+        try:
+            translated = provider.translate_batch(texts, log_cb=log_cb)
+            # Валидация: количество переведённых должно совпадать с отправленными
+            if len(translated) != len(texts):
+                raise ValueError(
+                    f"Получено {len(translated)} переводов, ожидалось {len(texts)} — повтор"
+                )
+            # Проверяем что не вернулись пустые строки для непустых оригиналов
+            empty_count = sum(1 for t in translated if not t.strip())
+            if empty_count > len(texts) * 0.5:
+                raise ValueError(
+                    f"Слишком много пустых ответов ({empty_count}/{len(texts)}) — повтор"
+                )
+
+            _log(f"  ✓ Батч переведён (попытка {attempt})", log_cb)
+            return True, translated
+        except Exception as e:
+            err_str = str(e).lower()
+            # Rate limit (429) — ждём значительно дольше
+            is_rate_limit = (
+                "429" in err_str or
+                "rate limit" in err_str or
+                "quota" in err_str or
+                "resource exhausted" in err_str or
+                "too many requests" in err_str
+            )
+            if is_rate_limit:
+                # Берём время из заголовка Retry-After (OpenAI/Anthropic/Groq)
+                # или из текста ошибки (Gemini и другие) — сервер знает лучше нас.
+                server_wait = _extract_retry_after(e)
+                if server_wait is not None:
+                    wait_time = min(server_wait + 1.0, 300.0)  # +1s буфер, max 5 мин
+                    _log(f"  ⏳ Rate limit! Сервер: ждём {wait_time:.0f}с (Retry-After)...", log_cb)
+                else:
+                    wait_time = min(delay * 4, 120.0)
+                    _log(f"  ⏳ Rate limit! Ждём {wait_time:.0f}с...", log_cb)
+            else:
+                wait_time = delay
+                _log(f"  ✗ Попытка {attempt}/{config.max_retries}: {e}", log_cb)
+            if attempt < config.max_retries:
+                _log(f"  ↻ Повтор через {wait_time:.1f}с...", log_cb)
+                # BUG FIX: "cancel_event.wait(wait_time) if cancel_event else False"
+                # skipped the wait ENTIRELY when no cancel_event was supplied (this
+                # is exactly the case for every `cli.py translate` run, which never
+                # passes one) — retries fired back-to-back with zero backoff,
+                # hammering a still-active rate limit instead of waiting it out.
+                if cancel_event:
+                    cancelled = cancel_event.wait(wait_time)
+                else:
+                    time.sleep(wait_time)
+                    cancelled = False
+                if cancelled:
+                    _log("  ⏹ Ожидание прервано по запросу пользователя.", log_cb)
+                    return False, [""] * len(texts)
+                delay = min(delay * 2, 60.0)
+
+    # Все попытки провалились — делим пополам, если батч > 1 строки
+    if len(texts) > 1:
+        half = len(texts) // 2
+        _log(f"  ↗ Делю батч пополам ({half} + {len(texts) - half} строк)...", log_cb)
+        ok1, part1 = _do_translate_batch(provider, texts[:half], config, log_cb, cancel_event)
+        ok2, part2 = _do_translate_batch(provider, texts[half:], config, log_cb, cancel_event)
+        if ok1 or ok2:
+            return True, part1 + part2
+
+    _log(f"  ✗ Батч из {len(texts)} строк не удалось перевести — оставляем оригинал.", log_cb)
+    return False, [""] * len(texts)
+
+
+def translate_texts(
+    texts: list[str],
+    config: TranslatorConfig,
+    log_callback: Callable[[str], None] | None = None,
+    progress_callback: Callable[[int, int, float, str], None] | None = None,
+    state=None,
+    cancel_event=None,
+    contexts: list[str] | None = None,
+) -> BatchResult:
+    """
+    Главная функция перевода.
+    - Пропускает строки из кэша (state)
+    - Батчи с защитой escape-кодов
+    - У

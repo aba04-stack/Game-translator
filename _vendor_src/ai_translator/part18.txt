@@ -1,0 +1,102 @@
+ translated_batch[li] = ""
+                            except Exception:
+                                translated_batch[li] = ""
+
+                # BUG FIX #4: state.save_periodically делает I/O —
+                # не держим лок во время записи (блокировало все рабочие потоки).
+                batch_results: list[tuple[int, str, str]] = []
+                for orig_idx, (original, translated) in zip(indices, zip(batch, translated_batch)):
+                    final_t = translated if (success and translated) else ""
+                    batch_results.append((orig_idx, original, final_t))
+
+                with lock:
+                    for orig_idx, original, final_t in batch_results:
+                        translated_map[orig_idx] = final_t
+                        if state and final_t and _validate_engine_tokens(original, final_t, config.game_type):
+                            state.set(original, final_t)
+                    done_count += len(batch)
+                    if progress_callback:
+                        batch_num = done_count // max(config.batch_size, 1)
+                        progress_callback(done_count, total_to_do, -1.0, f"батч {batch_num}")
+
+                # I/O вне лока
+                if state:
+                    state.save_periodically(50)
+                # NOTE: request_delay is now applied between batch SUBMISSIONS above,
+                # not here — applying it after completions didn't prevent API bursting.
+
+    # Собираем финальный результат
+    for i, text in enumerate(texts):
+        if cache_results[i] is not None:
+            result.results.append(cache_results[i])
+            result.succeeded += 1
+        else:
+            translated = translated_map.get(i, "")  # BUG FIX: was `text` — failed entries returned original
+            ok = i in translated_map and bool(translated_map[i])
+            tr = TranslationResult(original=text, translated=translated, success=ok)
+            result.results.append(tr)
+            if ok:
+                result.succeeded += 1
+                # Сохраняем новый перевод в глобальную TM для будущих проектов
+                if global_tm and _validate_engine_tokens(text, translated, config.game_type):
+                    global_tm.set(text, translated)
+            else:
+                result.failed += 1
+
+    if global_tm:
+        global_tm.flush()
+        global_tm.close()
+
+    if state:
+        state.save()
+
+    result.elapsed_sec = round(time.monotonic() - start, 2)
+    status = "⏹ Прервано" if result.cancelled else "Готово"
+    _log(
+        f"\n[Translator] {status}: {result.succeeded}/{result.total} строк, "
+        f"из кэша: {result.from_cache}, время: {result.elapsed_sec}с",
+        log_callback,
+    )
+    return result
+
+
+def _do_polish_batch(
+    provider,
+    pairs: list[tuple[str, str]],
+    config: TranslatorConfig,
+    log_cb: Callable[[str], None] | None,
+    cancel_event=None,
+) -> tuple[bool, list[str]]:
+    """
+    Полирует батч пар (original, draft) с retry — та же логика rate-limit /
+    экспоненциальной задержки, что и в _do_translate_batch. При полном
+    провале делит батч пополам и пробует снова. Возвращает (success, texts),
+    где texts при неудаче — ЧЕРНОВИКИ без изменений (безопасный откат,
+    а не пустые строки: полировка никогда не должна стирать существующий
+    перевод, только предлагать его улучшение).
+    """
+    delay = config.retry_delay
+    drafts = [d for _, d in pairs]
+
+    for attempt in range(1, config.max_retries + 1):
+        if cancel_event and cancel_event.is_set():
+            return False, drafts
+        try:
+            polished = provider.polish_batch(pairs, log_cb=log_cb)
+            if len(polished) != len(pairs):
+                raise ValueError(
+                    f"Получено {len(polished)} строк, ожидалось {len(pairs)} — повтор"
+                )
+            empty_count = sum(1 for t in polished if not t.strip())
+            if empty_count > len(pairs) * 0.5:
+                raise ValueError(
+                    f"Слишком много пустых ответов ({empty_count}/{len(pairs)}) — повтор"
+                )
+            _log(f"  ✓ Батч полировки готов (попытка {attempt})", log_cb)
+            return True, polished
+        except Exception as e:
+            err_str = str(e).lower()
+            is_rate_limit = (
+                "429" in err_str or "rate limit" in err_str or
+                "quota" in err_str or "resource exhausted" in err_str or
+                "too many requests" i

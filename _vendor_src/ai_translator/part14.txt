@@ -1,0 +1,91 @@
+мный retry (half-batch fallback)
+    - Валидация RPG-кодов после каждого перевода
+    - Rate limiting между батчами
+    - Кооперативная отмена через cancel_event
+    """
+    result = BatchResult(total=len(texts))
+    provider = _get_provider(config)
+    start = time.monotonic()
+
+    # Разделяем: из кэша / нужно переводить
+    cache_results: list[TranslationResult] = []
+    to_translate_indices: list[int] = []
+
+    for i, text in enumerate(texts):
+        if state and state.has(text):
+            cached = state.get(text) or ""
+            # No auto-repair of cached translations — just warn if codes are missing.
+            # The fix is in the system prompt (§N§ rule) not in post-hoc patching.
+            if cached and not _validate_engine_tokens(text, cached, config.game_type):
+                _log(
+                    f"[Translator] ⚠ Кэшированный перевод потерял escape-коды: {text[:60]!r}"
+                    " — будет переведён заново",
+                    log_callback,
+                )
+                cached = ""  # force re-translation
+            if cached:
+                cache_results.append(TranslationResult(
+                    original=text, translated=cached, success=True, from_cache=True
+                ))
+                result.from_cache += 1
+            else:
+                cache_results.append(None)  # type: ignore
+                to_translate_indices.append(i)
+        else:
+            cache_results.append(None)  # type: ignore
+            to_translate_indices.append(i)
+
+    if result.from_cache:
+        _log(f"[Translator] Из кэша: {result.from_cache}/{len(texts)} строк", log_callback)
+
+    # ── Глобальная Translation Memory (второй слой кэша, между играми) ──
+    # Строки без escape-кодов могут совпадать между разными играми одного жанра
+    # (общие фразы UI, частые диалоговые конструкции). GlobalTM экономит вызовы API.
+    global_tm = None
+    tm_hits = 0
+    if config.use_global_tm and to_translate_indices:
+        try:
+            from global_tm import GlobalTM
+            # BUG FIX (P1-22, внешний аудит): tm_namespace уже смешивает
+            # target_lang+game_type+style_profile в одну составную строку,
+            # передаваемую как параметр target_lang в GlobalTM (де-факто
+            # composite key внутри одной колонки — так изоляция по движку
+            # и стилю уже была). Не было ТОЛЬКО source_lang — одинаковый
+            # source-текст, переведённый из РАЗНЫХ исходных языков (или с
+            # разным source_lang между проектами), мог получить чужой
+            # закэшированный перевод. Добавляем source_lang в ту же
+            # составную строку — без изменения схемы БД и без миграции
+            # существующих данных (старые записи просто перестают
+            # совпадать с новым namespace, что безопасно — они не
+            # удаляются и не портятся, просто больше не используются для
+            # новых, более точных по языку запросов).
+            tm_namespace = (f"{config.source_lang}|{config.target_lang}|{config.game_type}|{config.style_profile or 'default'}"
+                           if config.game_type not in ("", "unknown") else f"{config.source_lang}|{config.target_lang}")
+            global_tm = GlobalTM(target_lang=tm_namespace).open()
+            still_missing = [texts[i] for i in to_translate_indices]
+            tm_map = global_tm.bulk_lookup(still_missing)
+            if tm_map:
+                remaining_indices = []
+                for i in to_translate_indices:
+                    t = texts[i]
+                    tm_trans = tm_map.get(t.strip())
+                    if tm_trans and _validate_engine_tokens(t, tm_trans, config.game_type):
+                        cache_results[i] = TranslationResult(
+                            original=t, translated=tm_trans, success=True, from_cache=True
+                        )
+                        result.from_cache += 1
+                        tm_hits += 1
+                    else:
+                        remaining_indices.append(i)
+                to_translate_indices = remaining_indices
+                if tm_hits:
+                    _log(f"[Translator] Из глобальной TM: {tm_hits} строк", log_callback)
+        except Exception as e:
+            _log(f"[Translator] ⚠ Global TM недоступна: {e}", log_callback)
+            global_tm = None
+
+    texts_to_translate = [texts[i] for i in to_translate_indices]
+
+    if not texts_to_translate:
+        _log("[Translator] Все строки из кэша — API не вызывается.", log_callback)
+      

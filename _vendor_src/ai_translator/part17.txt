@@ -1,0 +1,83 @@
+            else:
+                    time.sleep(config.request_delay)
+
+    else:
+        # ── Параллельный режим: без истории (порядок завершения непредсказуем) ──
+        with ThreadPoolExecutor(max_workers=config.max_workers) as executor:
+            futures: dict = {}
+            for b_start, batch, indices, batch_ctx in batches:
+                if cancel_event and cancel_event.is_set():
+                    break
+                cfg_copy = TranslatorConfig(**config.__dict__)
+                cfg_copy.previous_context_block = ""
+                future = executor.submit(
+                    _do_translate_batch, provider,
+                    batch_ctx if batch_ctx else batch,
+                    cfg_copy, log_callback, cancel_event,
+                )
+                futures[future] = (b_start, batch, indices, cfg_copy)
+                # BUG FIX #9: request_delay applied BEFORE next submission,
+                # not after completion. This is the correct place to rate-limit
+                # bursting when parallel workers submit to the API concurrently.
+                # BUG FIX: was a plain time.sleep(), ignoring cancel_event — same
+                # issue as the sequential-mode delay above, fixed the same way.
+                if config.request_delay > 0 and b_start + config.batch_size < total_to_do:
+                    if cancel_event:
+                        cancel_event.wait(config.request_delay)
+                    else:
+                        time.sleep(config.request_delay)
+
+            # BUG FIX #3: отменяем ещё не запущенные futures при cancel
+            if cancel_event and cancel_event.is_set():
+                result.cancelled = True
+                for f in futures:
+                    f.cancel()
+
+            for future in as_completed(futures):
+                b_start, batch, indices, batch_cfg_copy = futures[future]
+                if cancel_event and cancel_event.is_set():
+                    result.cancelled = True
+                    future.cancel()
+                    continue
+
+                try:
+                    success, translated_batch = future.result()
+                except Exception as e:
+                    success = False
+                    translated_batch = [""] * len(batch)
+                    _log(f"  ✗ Внутренняя ошибка потока (батч {b_start}): {e}", log_callback)
+
+                translated_batch = _validate_and_repair_batch(batch, translated_batch, log_callback, config.game_type)
+
+                # ── Retry строк с потерянными кодами или пропущенными в
+                # неполном batch-ответе (batch_size=1) — см. подробный
+                # комментарий у идентичного места в последовательном режиме
+                # выше (BUG FIX P0-10/P0-11).
+                if success:
+                    retry_local = [
+                        i for i, (o, t) in enumerate(zip(batch, translated_batch))
+                        if o and (not t or not _validate_engine_tokens(o, t, config.game_type))
+                    ]
+                    if retry_local:
+                        _log(f"  🔁 Retry {len(retry_local)} строк (batch=1)...", log_callback)
+                        for li in retry_local:
+                            if cancel_event and cancel_event.is_set(): break
+                            try:
+                                orig_line = batch[li]
+                                missing_codes = _extract_codes(orig_line)
+                                retry_cfg = TranslatorConfig(**batch_cfg_copy.__dict__)
+                                if missing_codes:
+                                    codes_str = " ".join(missing_codes[:8])
+                                    retry_cfg.extra_instructions = (
+                                        f"CRITICAL: preserve these codes: {codes_str}\n"
+                                        + (batch_cfg_copy.extra_instructions or "")
+                                    ).strip()
+                                ok1, r1 = _do_translate_batch(
+                                    provider, [orig_line],
+                                    retry_cfg, log_callback, cancel_event,
+                                )
+                                r1 = _validate_and_repair_batch([orig_line], r1, None, config.game_type)
+                                if ok1 and r1[0] and _validate_engine_tokens(orig_line, r1[0], config.game_type):
+                                    translated_batch[li] = r1[0]
+                                else:
+       

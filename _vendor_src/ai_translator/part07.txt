@@ -1,0 +1,121 @@
+ True
+        elif current_idx is not None:
+            current_lines.append(line)
+    _flush()
+
+    if found_any:
+        return results
+
+    # Попытка 1b: формат нумерованного списка "N. text" или "N) text"
+    lines = raw.split("\n")
+    current_idx = None
+    current_lines = []
+    found_any_b = False
+
+    def _flush_b():
+        nonlocal current_lines
+        if current_idx is not None and 0 <= current_idx < expected:
+            val = _clean_translation("\n".join(current_lines))
+            results[current_idx] = val
+        current_lines = []
+
+    for line in lines:
+        m = _NUM_LIST_RE.match(line.strip())
+        if m:
+            _flush_b()
+            current_idx = int(m.group(1)) - 1
+            current_lines = [m.group(2)]
+            found_any_b = True
+        elif current_idx is not None:
+            current_lines.append(line)
+    _flush_b()
+
+    if found_any_b:
+        return results
+
+    # Попытка 2: строки по порядку — убираем [N], N., N) префиксы
+    non_empty = [l.strip() for l in raw.strip().split("\n") if l.strip()]
+    if non_empty:
+        for i, line in enumerate(non_empty[:expected]):
+            results[i] = _NUM_PREFIX_RE.sub("", line)
+        if any(results):
+            return results
+
+    # Попытка 3: весь текст в первый элемент (для одиночных строк)
+    if expected == 1:
+        results[0] = raw.strip()
+        return results
+
+    # Попытка 4: разбиваем по строкам без нумерации — убираем возможный префикс
+    if not any(results) and expected > 1:
+        all_lines = [l.strip() for l in raw.strip().splitlines() if l.strip()]
+        for i in range(min(expected, len(all_lines))):
+            results[i] = _NUM_PREFIX_RE.sub("", all_lines[i])
+
+    return results
+
+
+def _log(msg: str, cb: Callable[[str], None] | None = None):
+    print(msg, flush=True)
+    if cb:
+        cb(msg)
+
+
+class OpenAIProvider:
+    def __init__(self, config: TranslatorConfig):
+        self.config = config
+        # Lazy SDK loading: constructing a provider must not require the optional
+        # SDK until an actual network request is made. This keeps CLI/tests and
+        # local/mock providers usable even when the OpenAI package is absent,
+        # while translate_batch/polish_batch still report a precise dependency
+        # error at the point where it is actually needed.
+        self._client = None
+
+    def _client_or_raise(self):
+        if self._client is not None:
+            return self._client
+        try:
+            from openai import OpenAI
+            kwargs = {"api_key": self.config.api_key, "timeout": self.config.timeout}
+            if self.config.base_url:
+                kwargs["base_url"] = self.config.base_url
+            self._client = OpenAI(**kwargs)
+            return self._client
+        except ImportError as exc:
+            raise RuntimeError("openai не установлен: pip install openai") from exc
+
+    def translate_batch(self, texts: list[str], log_cb=None) -> list[str]:
+        client = self._client_or_raise()
+
+        protected_texts, all_placeholders = _protect_texts(texts, self.config.game_type)
+
+        prompt = _build_batch_prompt(
+            texts, protected_texts,
+            self.config.source_lang, self.config.target_lang,
+        )
+
+        _log(f"  [OpenAI] {len(texts)} строк → {self.config.get_model()}", log_cb)
+
+        resp = client.chat.completions.create(
+            model=self.config.get_model(),
+            temperature=self.config.temperature,
+            max_tokens=self.config.max_tokens,
+            messages=[
+                {"role": "system", "content": self.config.get_system_prompt()},
+                {"role": "user", "content": prompt},
+            ],
+        )
+
+        raw = resp.choices[0].message.content or ""
+        parsed = _parse_numbered(raw, len(texts))
+        # _strip_context_hint is applied centrally in _validate_and_repair_batch;
+        # _restore_codes must run here so placeholders survive the repair pass.
+        return [_restore_codes(t, ph) for t, ph in zip(parsed, all_placeholders)]
+
+    def polish_batch(self, pairs: list[tuple[str, str]], log_cb=None) -> list[str]:
+        client = self._client_or_raise()
+        protected_pairs, all_placeholders = _protect_pairs_for_polish(pairs, self.config.game_type)
+        prompt = _build_polish_prompt(pairs, protected_pairs, self.config.target_lang)
+        _log(f"  [OpenAI/Polish] {len(pairs)} строк → {self.config.get_model()}", log_cb)
+        resp = client.chat.completions.create(
+            model=sel
