@@ -26,11 +26,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat payload/.payload/chunk-* > /tmp/rpgmtl.tar.gz.b64
-          base64 --decode /tmp/rpgmtl.tar.gz.b64 > /tmp/rpgmtl.tar.gz
-          tar -tzf /tmp/rpgmtl.tar.gz >/dev/null
+          cat payload/.payload/chunk-* > /tmp/rpgmtl.archive.b64
+          base64 --decode /tmp/rpgmtl.archive.b64 > /tmp/rpgmtl.archive
+          xz --test /tmp/rpgmtl.archive
+          xz -dc /tmp/rpgmtl.archive > /tmp/rpgmtl.tar
+          tar -tf /tmp/rpgmtl.tar >/dev/null
           mkdir -p /tmp/rpgmtl-unpacked
-          tar -xzf /tmp/rpgmtl.tar.gz -C /tmp/rpgmtl-unpacked --strip-components=1
+          tar -xf /tmp/rpgmtl.tar -C /tmp/rpgmtl-unpacked --strip-components=1
           test -f /tmp/rpgmtl-unpacked/run.py
           test -d /tmp/rpgmtl-unpacked/engine
           find /tmp/rpgmtl-unpacked -type f -print0 | while IFS= read -r -d '' src; do
