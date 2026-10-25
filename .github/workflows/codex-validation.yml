@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - codex/ci-check-20261025
+      - codex/deepseek-integration-tests-20261025
+      - codex/deepseek-integration-tests-20261025
   pull_request:
     branches:
       - main
@@ -35,6 +37,6 @@ jobs:
       - name: Compile Python modules
         run: python -m compileall -q .
       - name: Run tests
-        run: QT_QPA_PLATFORM=offscreen python -m pytest tests -q
+        run: QT_QPA_PLATFORM=offscreen python -m pytest tests -vv
       - name: Check Python files with pyflakes
         run: python -m pyflakes $(git ls-files '*.py' | grep -v '^tests/')

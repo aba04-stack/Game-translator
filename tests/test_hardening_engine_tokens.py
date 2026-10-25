@@ -74,3 +74,20 @@ def test_rpgmv_plugin_placeholders_are_protected_and_validated():
         # Легитимный перевод, сохранивший все токены -- должен пройти.
         good = "Добро пожаловать, %1! У вас %2 золота. Привет, {playerName}, квест завершён!"
         assert _validate_engine_tokens(src, good, game_type)
+
+
+def test_rpgmv_formatting_tokens_are_protected_and_validated():
+    src = r"Hello, {player}! You have %s gold.\nPress \N[1] <color=#FF00FF>★</color> \C[2]©"
+    for game_type in ("rpgmv", "rpgmz"):
+        protected, mapping = _protect_codes(src, game_type)
+        assert protected != src
+        restored = _restore_codes(protected, mapping)
+        assert restored == src
+        assert _validate_engine_tokens(src, restored, game_type)
+
+        damaged = restored.replace("%s", "", 1)
+        assert not _validate_engine_tokens(src, damaged, game_type)
+        damaged = restored.replace("</color>", "", 1)
+        assert not _validate_engine_tokens(src, damaged, game_type)
+        damaged = restored.replace("★", "", 1)
+        assert not _validate_engine_tokens(src, damaged, game_type)

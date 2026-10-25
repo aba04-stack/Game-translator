@@ -64,8 +64,8 @@ _ENGINE_TOKEN_PATTERNS = {
     # проходил _validate_engine_tokens как валидный, эмпирически
     # подтверждено. Добавляем тот же уровень защиты, что уже был у ВСЕХ
     # остальных 8 движков.
-    "rpgmv": re.compile(r"(?:%\d+|\{[A-Za-z_][\w.]*\}|\\[nrt])"),
-    "rpgmz": re.compile(r"(?:%\d+|\{[A-Za-z_][\w.]*\}|\\[nrt])"),
+    "rpgmv": re.compile(r"(?:%[+#0\- ]*(?:\d+\$)?\d*(?:\.\d+)?[diuoxXfFeEgGcs]|%\d+|\{[A-Za-z_][\w.]*\}|</?[A-Za-z][^<>]*>|\\[nrt]|[©®™°★☆♪♥♦♣♠✓→←…])"),
+    "rpgmz": re.compile(r"(?:%[+#0\- ]*(?:\d+\$)?\d*(?:\.\d+)?[diuoxXfFeEgGcs]|%\d+|\{[A-Za-z_][\w.]*\}|</?[A-Za-z][^<>]*>|\\[nrt]|[©®™°★☆♪♥♦♣♠✓→←…])"),
 }
 
 
@@ -165,9 +165,8 @@ def _clean_translation(text: str) -> str:
 #   groq     — llama-3.1-8b-instant и llama-3.3-70b-versatile закрыты 2026-08-16
 #              (замены openai/gpt-oss-20b и openai/gpt-oss-120b), llama-3.1-70b-versatile
 #              снят ещё раньше (console.groq.com/docs/deprecations).
-#   deepseek — алиасы deepseek-chat / deepseek-reasoner закрыты 2026-07-24, замены
-#              deepseek-v4-flash / deepseek-v4-pro (по вторичным источникам, ссылающимся
-#              на документацию DeepSeek).
+#   deepseek — актуальны deepseek-flash / deepseek-v4-pro; legacy deepseek-v4-flash
+#              принимается, но модель выведена из обращения (api-docs.deepseek.com/quick_start/pricing/).
 #   openai   — gpt-4o / gpt-4o-mini ещё работают, но OpenAI объявила о снятии
 #              2027-01-14. Идентификатор преемника однозначно подтвердить не удалось,
 #              поэтому дефолт НЕ менялся — см. MODEL_LIFECYCLE ниже.
@@ -177,7 +176,7 @@ DEFAULT_MODELS = {
     "gemini":   "gemini-3.6-flash",
     "claude":   "claude-haiku-5-5",
     "groq":     "openai/gpt-oss-20b",
-    "deepseek": "deepseek-v4-flash",
+    "deepseek": "deepseek-flash",
     "mock":     "mock",
 }
 
@@ -817,8 +816,8 @@ MODEL_LIFECYCLE: dict[tuple[str, str], tuple[str | None, str]] = {
     ("groq", "llama-3.1-8b-instant"):     ("2026-08-16", "openai/gpt-oss-20b"),
     ("groq", "llama-3.3-70b-versatile"):  ("2026-08-16", "openai/gpt-oss-120b"),
     ("groq", "llama-3.1-70b-versatile"):  (None, "openai/gpt-oss-120b"),
-    ("deepseek", "deepseek-chat"):     ("2026-07-24", "deepseek-v4-flash"),
-    ("deepseek", "deepseek-reasoner"): ("2026-07-24", "deepseek-v4-flash или deepseek-v4-pro"),
+    ("deepseek", "deepseek-chat"):     ("2026-07-24", "deepseek-flash"),
+    ("deepseek", "deepseek-reasoner"): ("2026-07-24", "deepseek-flash или deepseek-v4-pro"),
     ("claude", "claude-3-5-haiku-latest"):  (None, "claude-haiku-5-5"),
     ("claude", "claude-3-5-sonnet-latest"): (None, "claude-sonnet-5-5"),
 }
@@ -1145,6 +1144,7 @@ class DeepSeekProvider:
                 api_key=config.api_key,
                 base_url="https://api.deepseek.com",
                 timeout=config.timeout,
+                max_retries=0,  # Pipeline owns bounded retries; avoid hidden SDK retries.
             )
         except ImportError:
             raise RuntimeError("openai не установлен: pip install openai")
@@ -1166,6 +1166,7 @@ class DeepSeekProvider:
             ],
             temperature=self.config.temperature,
             max_tokens=self.config.max_tokens,
+            extra_body={"thinking": {"type": "disabled"}},
         )
         raw = resp.choices[0].message.content or ""
         parsed = _parse_numbered(raw, len(texts))
@@ -1247,14 +1248,14 @@ QUALITY_MODES = {
     "fast": {
         "label": "⚡ Быстрый (дешевле)",
         "models": {"openai":"gpt-4o-mini","gemini":"gemini-3.6-flash",
-                   "claude":"claude-haiku-5-5","groq":"openai/gpt-oss-20b","deepseek":"deepseek-v4-flash"},
+                   "claude":"claude-haiku-5-5","groq":"openai/gpt-oss-20b","deepseek":"deepseek-flash"},
         "batch_size": 25, "temperature": 0.3, "use_context": False,
         "description": "Максимальная скорость, минимальная стоимость.",
     },
     "balanced": {
         "label": "⚖️ Сбалансированный (рекомендуется)",
         "models": {"openai":"gpt-4o-mini","gemini":"gemini-3.6-flash",
-                   "claude":"claude-haiku-5-5","groq":"openai/gpt-oss-120b","deepseek":"deepseek-v4-flash"},
+                   "claude":"claude-haiku-5-5","groq":"openai/gpt-oss-120b","deepseek":"deepseek-flash"},
         "batch_size": 20, "temperature": 0.2, "use_context": True,
         "description": "Оптимальное соотношение качества и стоимости.",
     },
@@ -1283,8 +1284,10 @@ _COST_PER_1K_TOKENS = {
     # будет выше — оценка здесь нижняя граница, не обещание.
     "gemini-3.6-flash": 0.0,
     "openai/gpt-oss-20b": 0.0, "openai/gpt-oss-120b": 0.0,
-    # deepseek-v4-flash: значение перенесено от deepseek-chat (0.0003), НЕ проверено.
-    "deepseek-v4-flash": 0.0003,
+    # Peak, non-cached estimate: average of $0.30/M input and $1.20/M output.
+    "deepseek-flash": 0.00075,
+    # Legacy alias is billed at the same Flash rate.
+    "deepseek-v4-flash": 0.00075,
 }
 
 

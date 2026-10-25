@@ -295,3 +295,25 @@ def test_pipeline_shows_which_default_model_is_used(tmp_path, monkeypatch):
     ok, logs = _translate_with_fake(tmp_path, monkeypatch, "claude")
     assert any("авто → claude-haiku-5-5" in m for m in logs)
     assert not any("⚠ Модель" in m for m in logs)                                      # у дефолта предупреждений нет
+
+
+def test_deepseek_translation_uses_current_model_and_disables_thinking():
+    cfg = TranslatorConfig(
+        provider="deepseek", api_key="test-key", model="deepseek-flash",
+        source_lang="English", target_lang="Russian", game_type="rpgmv",
+    )
+    provider = DeepSeekProvider(cfg)
+    provider._client = MagicMock()
+    provider._client.chat.completions.create.return_value = _openai_reply("[1] Привет")
+
+    assert provider.translate_batch(["Hello"]) == ["Привет"]
+    request = provider._client.chat.completions.create.call_args.kwargs
+    assert request["model"] == "deepseek-flash"
+    assert request["extra_body"] == {"thinking": {"type": "disabled"}}
+
+
+def test_deepseek_defaults_and_quality_modes_use_current_model_id():
+    assert DEFAULT_MODELS["deepseek"] == "deepseek-flash"
+    assert QUALITY_MODES["fast"]["models"]["deepseek"] == "deepseek-flash"
+    assert QUALITY_MODES["balanced"]["models"]["deepseek"] == "deepseek-flash"
+    assert QUALITY_MODES["quality"]["models"]["deepseek"] == "deepseek-v4-pro"

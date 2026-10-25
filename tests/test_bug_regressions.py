@@ -914,6 +914,7 @@ def test_retranslate_runs_off_ui_thread_not_blocking():
         return FakeResult()
 
     ai_translator.translate_texts = fake_translate_texts
+    th = None
     try:
         th = rd._RetranslateThread(["a", "b"], cfg=None)
         loop = QEventLoop()
@@ -929,6 +930,7 @@ def test_retranslate_runs_off_ui_thread_not_blocking():
         th.start()
         QTimer.singleShot(5000, loop.quit)  # safety timeout
         loop.exec()
+        assert th.wait(1000), "_RetranslateThread не завершился после отправки результата"
 
         assert "worker_thread_id" in captured, "translate_texts никогда не вызвался"
         assert captured["worker_thread_id"] != main_thread_id, \
@@ -940,6 +942,8 @@ def test_retranslate_runs_off_ui_thread_not_blocking():
         assert len(holder["result"].results) == 2
         assert holder["result"].results[0].translated == "T:a"
     finally:
+        if th is not None:
+            th.wait(5000)
         ai_translator.translate_texts = original_fn
 
 
@@ -958,6 +962,7 @@ def test_retranslate_thread_propagates_exceptions_via_signal():
         raise RuntimeError("simulated API failure")
 
     ai_translator.translate_texts = failing_translate_texts
+    th = None
     try:
         th = rd._RetranslateThread(["a"], cfg=None)
         loop = QEventLoop()
@@ -972,10 +977,13 @@ def test_retranslate_thread_propagates_exceptions_via_signal():
         th.start()
         QTimer.singleShot(3000, loop.quit)
         loop.exec()
+        assert th.wait(1000), "_RetranslateThread не завершился после отправки ошибки"
 
         assert holder.get("result") is None
         assert "simulated API failure" in holder.get("error", "")
     finally:
+        if th is not None:
+            th.wait(5000)
         ai_translator.translate_texts = original_fn
 
 
