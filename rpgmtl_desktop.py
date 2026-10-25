@@ -2612,7 +2612,7 @@ def _redact_secrets(text: str, *known_secrets: str) -> str:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("RPG Maker / Unity — AI Переводчик")
+        self.setWindowTitle("Game Translator — RPG Maker / Unity — AI-переводчик")
         self.setMinimumSize(960, 700)
         self.resize(1200, 800)
         self._worker: WorkerThread | None = None
@@ -3209,10 +3209,10 @@ class MainWindow(QMainWindow):
             QGuiApplication.beep()
         except Exception:
             pass
-        self.setWindowTitle("✓ Перевод завершён — RPG AI Translator")
+        self.setWindowTitle("✓ Перевод завершён — Game Translator")
         # BUG FIX: таймер сбрасывал заголовок в "RPG AI Translator" (другой),
         # а не в оригинальный "RPG Maker / Unity — AI Переводчик"
-        QTimer.singleShot(5000, lambda: self.setWindowTitle("RPG Maker / Unity — AI Переводчик"))
+        QTimer.singleShot(5000, lambda: self.setWindowTitle("Game Translator — RPG Maker / Unity — AI-переводчик"))
 
     def _on_inject_complete(self):
         """Показать кнопку открытия папки и статистику после inject."""

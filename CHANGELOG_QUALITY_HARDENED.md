@@ -1,8 +1,8 @@
-# RPGMTL v5.0 — Quality Hardened
+# Game Translator v5.0 — Quality Hardened
 
 ## Safety / correctness
 - Inject is transactional: targeted source files and protected assets are snapshotted before writes.
-- If an injector reports errors, modifies a protected asset, changes an unapproved JSON path, or raises an exception, RPGMTL restores the pre-inject bytes and reports failure.
+- If an injector reports errors, modifies a protected asset, changes an unapproved JSON path, or raises an exception, Game Translator restores the pre-inject bytes and reports failure.
 - Rollback snapshots use independent file copies, never hardlinks, so in-place writes cannot corrupt the rollback copy.
 - Durable original backups are created before QA/SmartWarp/injection when backup mode is enabled.
 - RPG Maker keeps flat JSON backup compatibility plus path-preserving backups.

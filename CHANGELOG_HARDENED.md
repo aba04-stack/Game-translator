@@ -1,8 +1,8 @@
-# RPGMTL v5.0 Hardened — audit changes
+# Game Translator v5.0 Hardened — audit changes
 
 ## Research-driven changes
 
-RPGMTL was compared conceptually against current game-localization tools and engine-native approaches. The strongest recurring ideas were:
+Game Translator was compared conceptually against current game-localization tools and engine-native approaches. The strongest recurring ideas were:
 
 - Translator++ / similar editors: translation memory, context, glossary, editable structured entries.
 - MTool: automatic engine detection and a simple Extract → Translate workflow.
@@ -10,7 +10,7 @@ RPGMTL was compared conceptually against current game-localization tools and eng
 - Ren'Py native translation: engine syntax must remain separate from translated dialogue/UI strings.
 - UABEA: Unity serialized files/AssetBundles require a real asset-aware layer; plain JSON/TXT extraction is not equivalent.
 
-RPGMTL now adopts the safe parts of those ideas without pretending unsupported Unity binary formats are text files.
+Game Translator now adopts the safe parts of those ideas without pretending unsupported Unity binary formats are text files.
 
 ## Fixes in this build
 
