@@ -513,7 +513,7 @@ def cmd_import(args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rpgmtl",
-        description="Game Translator — AI-переводчик игр",
+        description="Game Translator — ИИ-переводчик игр",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
