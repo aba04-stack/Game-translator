@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-cli.py — Интерфейс командной строки для Game Translator.
+cli.py — Интерфейс командной строки для PatchLingo.
 
 Использование:
   python cli.py extract  --game /path/to/game --output /path/to/out
@@ -512,8 +512,8 @@ def cmd_import(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="rpgmtl",
-        description="Game Translator — ИИ-переводчик игр",
+        prog="patchlingo",
+        description="PatchLingo — ИИ-переводчик игр",
     )
     sub = parser.add_subparsers(dest="command", required=True)
 

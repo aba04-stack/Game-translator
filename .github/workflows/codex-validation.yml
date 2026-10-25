@@ -1,4 +1,4 @@
-name: Game Translator CI
+name: PatchLingo CI
 
 on:
   push:

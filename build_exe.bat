@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 echo ================================================
-echo  RPG Maker AI Translator — сборка EXE
+echo  PatchLingo — сборка EXE
 echo ================================================
 echo.
 
@@ -33,7 +33,7 @@ pyinstaller ^
   --clean ^
   --onefile ^
   --windowed ^
-  --name "GameTranslator" ^
+  --name "PatchLingo" ^
   --add-data "engine;engine" ^
   --hidden-import "engine" ^
   --hidden-import "engine.extractor" ^
@@ -86,6 +86,6 @@ if errorlevel 1 (
 
 echo.
 echo [3/3] Готово!
-echo EXE: dist\GameTranslator.exe
+echo EXE: dist\PatchLingo.exe
 echo.
 if not defined CI pause

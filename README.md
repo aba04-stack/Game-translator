@@ -1,4 +1,4 @@
-# Game Translator — ИИ-переводчик игр
+# PatchLingo — ИИ-переводчик игр
 
 Извлекает тексты из игры, переводит их через ИИ (OpenAI, Gemini, Claude, Groq, DeepSeek или локальный сервер),
 проверяет результат и вставляет перевод обратно — с резервной копией оригинала и откатом.
@@ -80,7 +80,7 @@ python cli.py stats     --game /путь/к/игре --output /путь/выво
 
 ## Проверки GitHub Actions
 
-- **Game Translator CI** запускается при push в `main` и рабочую ветку, а также для pull request в `main`. Он устанавливает зависимости, проверяет запуск CLI, компиляцию, весь набор офлайн-тестов и pyflakes. API-ключ для этого workflow не нужен.
+- **PatchLingo CI** запускается при push в `main` и рабочую ветку, а также для pull request в `main`. Он устанавливает зависимости, проверяет запуск CLI, компиляцию, весь набор офлайн-тестов и pyflakes. API-ключ для этого workflow не нужен.
 - **DeepSeek Integration** запускается вручную из вкладки **Actions** на ветке `main`. Он отправляет один небольшой пакет из четырёх игровых строк модели `deepseek-flash`, проверяет перевод, плейсхолдеры, escape-коды, теги и символы, а затем выполняет Extract → Inject на временной RPG Maker MV-игре и сверяет JSON-структуру. Режим рассуждений отключён, вывод ограничен 384 токенами. Запрос оплачивается по действующему тарифу DeepSeek; см. [официальные цены](https://api-docs.deepseek.com/quick_start/pricing/).
 - Чтобы запустить live-проверку после попадания workflow в `main`: **Actions → DeepSeek Integration → Run workflow → Run workflow**. В репозитории должен быть Secret `DEEPSEEK_API_KEY`. Workflow не запускается на pull request и выдаёт секрет только коду из `main`; вывод и сообщения об ошибках не содержат ключ.
 
@@ -99,9 +99,9 @@ python -m pyflakes $(git ls-files '*.py' | grep -v '^tests/')
 ## Сборка Windows EXE
 
 На Windows с Python 3.11+ запусти `build_exe.bat`. Он установит зависимости и создаст
-`dist/GameTranslator.exe`. Для сборки в GitHub открой **Actions → Windows Build**:
-workflow собирает приложение на Windows runner и прикрепляет `GameTranslator.exe` как
-артефакт `GameTranslator-Windows` на 14 дней. Сборка не требует API-ключа.
+`dist/PatchLingo.exe`. Для сборки в GitHub открой **Actions → Windows Build**:
+workflow собирает приложение на Windows runner и прикрепляет `PatchLingo.exe` как
+артефакт `PatchLingo-Windows` на 14 дней. Сборка не требует API-ключа.
 
 ## Известные ограничения
 

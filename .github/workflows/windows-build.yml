@@ -34,20 +34,20 @@ jobs:
       - name: Verify executable and write checksum
         shell: pwsh
         run: |
-          $exe = Get-Item "dist/GameTranslator.exe"
+          $exe = Get-Item "dist/PatchLingo.exe"
           if ($exe.Length -lt 1MB) {
             throw "The packaged executable is unexpectedly small ($($exe.Length) bytes)."
           }
           $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
-          "$hash  GameTranslator.exe" | Set-Content "dist/GameTranslator.exe.sha256" -Encoding ascii
+          "$hash  PatchLingo.exe" | Set-Content "dist/PatchLingo.exe.sha256" -Encoding ascii
           Write-Host "Built $($exe.Length) bytes; SHA-256 $hash"
 
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: GameTranslator-Windows
+          name: PatchLingo-Windows
           path: |
-            dist/GameTranslator.exe
-            dist/GameTranslator.exe.sha256
+            dist/PatchLingo.exe
+            dist/PatchLingo.exe.sha256
           if-no-files-found: error
           retention-days: 14
