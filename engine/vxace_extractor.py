@@ -6,6 +6,7 @@ vxace_extractor.py — извлечение текста из RPG Maker VX/Ace �
 """
 
 from engine.file_utils import atomic_write_bytes, atomic_write_json, find_dir_ci
+import importlib
 import io
 from pathlib import Path
 from typing import Callable
@@ -432,7 +433,7 @@ def extract_vxace(
     # "Extract завершён, 0 строк" без ясной причины. Теперь — одна явная ошибка
     # в начале, до попытки обработки файлов.
     try:
-        import rubymarshal.reader  # noqa: F401
+        importlib.import_module("rubymarshal.reader")
     except ImportError:
         msg = (
             "[VXAce] ✗ Библиотека 'rubymarshal' не установлена — она нужна для "

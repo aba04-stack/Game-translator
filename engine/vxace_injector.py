@@ -5,6 +5,7 @@ vxace_injector.py — вставка переводов в RPG Maker VX/Ace .rvd
 и заменяет текст, сохраняя всю структуру файла нетронутой.
 """
 
+import importlib
 import io
 import json
 import os
@@ -305,7 +306,7 @@ def inject_vxace(
     # BUG FIX: см. тот же фикс в extract_vxace — явная проверка ДО обработки
     # файлов вместо тихого per-file "✗ ...: No module named 'rubymarshal'".
     try:
-        import rubymarshal.reader  # noqa: F401
+        importlib.import_module("rubymarshal.reader")
     except ImportError:
         msg = (
             "[VXAce Inject] ✗ Библиотека 'rubymarshal' не установлена — она нужна "

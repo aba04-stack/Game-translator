@@ -392,7 +392,8 @@ class Pipeline:
             # поэтому игру можно переместить, но другой проект использовать нельзя.
             try:
                 manifest = write_manifest(self.output_dir, self.game_dir, game_type)
-                self._log(f"[Extract] Project lock: {manifest.get("fingerprint", "")[:16]}…")
+                fingerprint = manifest.get("fingerprint", "")[:16]
+                self._log(f"[Extract] Project lock: {fingerprint}…")
             except Exception as e:
                 return False, f"[Extract] ✗ Не удалось создать project lock: {e}"
 
