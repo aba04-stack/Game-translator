@@ -43,7 +43,7 @@ def check(name: str) -> bool:
 
 def main():
     print("═" * 56)
-    print("  RPG Maker MV/MZ — AI Переводчик")
+    print("  PatchLingo — ИИ-переводчик игровых текстов")
     print("  Встроенный движок · Dedup · Glossary · Resume")
     print("═" * 56)
     print()
