@@ -1,0 +1,21 @@
+# Обязательно
+PyQt6>=6.5.0
+
+# AI провайдеры
+openai>=1.0.0
+# Gemini: google-genai — актуальный SDK. Старый google-generativeai снят с поддержки
+# (при импорте он сам предупреждает: «All support for the google.generativeai package has
+# ended»); код всё ещё умеет им пользоваться как запасным вариантом, но ставить его не нужно.
+google-genai>=1.0.0
+# google-generativeai>=0.8.0   # устаревший fallback — только если уже установлен
+anthropic>=0.25.0
+groq>=0.9.0
+
+# Движки
+rubymarshal>=1.2.0  # для RPG Maker VX/Ace (.rvdata2)
+
+# Экспорт
+openpyxl>=3.1.0  # для «Экспорт для переводчика» (.xlsx), rpgmtl_desktop.py
+
+# Тестирование
+pytest>=8.0.0
