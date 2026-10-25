@@ -96,6 +96,13 @@ python -m pyflakes $(git ls-files '*.py' | grep -v '^tests/')
 Тесты изолированы: каждый получает пустую домашнюю папку (настройки, лог, Global TM) и не трогает ваши данные
 (`tests/conftest.py`).
 
+## Сборка Windows EXE
+
+На Windows с Python 3.11+ запусти `build_exe.bat`. Он установит зависимости и создаст
+`dist/GameTranslator.exe`. Для сборки в GitHub открой **Actions → Windows Build**:
+workflow собирает приложение на Windows runner и прикрепляет `GameTranslator.exe` как
+артефакт `GameTranslator-Windows` на 14 дней. Сборка не требует API-ключа.
+
 ## Известные ограничения
 
 Коротко (подробно — в [PROJECT_STATUS.md](PROJECT_STATUS.md)): не проверялись реальные пользовательские игры; live API smoke-тест добавлен, но требует ручного запуска и не выполняется автоматически. GUI

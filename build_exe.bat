@@ -13,7 +13,7 @@ if errorlevel 1 (
     echo ОШИБКА: Python не найден.
     echo Скачайте Python 3.11+ с https://python.org
     echo При установке отметьте "Add Python to PATH"
-    pause
+    if not defined CI pause
     exit /b 1
 )
 
@@ -21,7 +21,7 @@ echo [1/3] Установка зависимостей...
 pip install -r requirements.txt pyinstaller --quiet
 if errorlevel 1 (
     echo ОШИБКА при установке зависимостей.
-    pause
+    if not defined CI pause
     exit /b 1
 )
 echo     OK
@@ -29,9 +29,11 @@ echo     OK
 echo.
 echo [2/3] Сборка EXE (3-5 минут)...
 pyinstaller ^
+  --noconfirm ^
+  --clean ^
   --onefile ^
   --windowed ^
-  --name "RPGTranslator" ^
+  --name "GameTranslator" ^
   --add-data "engine;engine" ^
   --hidden-import "engine" ^
   --hidden-import "engine.extractor" ^
@@ -78,12 +80,12 @@ pyinstaller ^
 if errorlevel 1 (
     echo.
     echo ОШИБКА при сборке. Используйте run.bat для запуска без сборки.
-    pause
+    if not defined CI pause
     exit /b 1
 )
 
 echo.
 echo [3/3] Готово!
-echo EXE: dist\RPGTranslator.exe
+echo EXE: dist\GameTranslator.exe
 echo.
-pause
+if not defined CI pause
