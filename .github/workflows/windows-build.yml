@@ -13,9 +13,9 @@ permissions:
   contents: read
 
 jobs:
-  windows-exe:
+  windows-installer:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -31,7 +31,7 @@ jobs:
         env:
           CI: "true"
 
-      - name: Verify executable and write checksum
+      - name: Verify portable app and write checksum
         shell: pwsh
         run: |
           $exe = Get-Item "dist/PatchLingo.exe"
@@ -40,14 +40,87 @@ jobs:
           }
           $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
           "$hash  PatchLingo.exe" | Set-Content "dist/PatchLingo.exe.sha256" -Encoding ascii
-          Write-Host "Built $($exe.Length) bytes; SHA-256 $hash"
+          Write-Host "Built portable app: $($exe.Length) bytes; SHA-256 $hash"
 
-      - name: Upload Windows build
+      - name: Install Inno Setup
+        run: choco install innosetup --version=6.7.1 --yes --no-progress
+        shell: pwsh
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $compiler = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $compiler)) {
+            throw "Inno Setup compiler was not found at $compiler"
+          }
+          & $compiler /Qp /O"dist" "packaging\PatchLingo.iss"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Verify installer and install it in a temporary folder
+        shell: pwsh
+        run: |
+          $setup = Get-Item "dist/PatchLingo-Setup.exe"
+          if ($setup.Length -lt 1MB) {
+            throw "The installer is unexpectedly small ($($setup.Length) bytes)."
+          }
+          $hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash
+          "$hash  PatchLingo-Setup.exe" | Set-Content "dist/PatchLingo-Setup.exe.sha256" -Encoding ascii
+
+          $installDir = Join-Path $env:RUNNER_TEMP "PatchLingo-Smoke"
+          $installArgs = @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/DIR=$installDir")
+          $install = Start-Process -FilePath $setup.FullName -ArgumentList $installArgs -Wait -PassThru
+          if ($install.ExitCode -ne 0) {
+            throw "The installer returned exit code $($install.ExitCode)."
+          }
+
+          $installedExe = Join-Path $installDir "PatchLingo.exe"
+          if (-not (Test-Path $installedExe)) {
+            throw "The installer did not place PatchLingo.exe in $installDir."
+          }
+
+          Get-Process -Name "PatchLingo" -ErrorAction SilentlyContinue | Stop-Process -Force
+          $startTime = Get-Date
+          $app = Start-Process -FilePath $installedExe -WorkingDirectory $installDir -PassThru
+          try {
+            $visibleWindows = @()
+            for ($attempt = 0; $attempt -lt 15; $attempt++) {
+              Start-Sleep -Seconds 1
+              $processes = Get-Process -Name "PatchLingo" -ErrorAction SilentlyContinue |
+                Where-Object { $_.StartTime -ge $startTime }
+              $visibleWindows = @($processes | Where-Object {
+                $_.MainWindowHandle -ne [IntPtr]::Zero -and $_.MainWindowTitle
+              })
+              if ($visibleWindows.Count -gt 0) { break }
+            }
+            if ($visibleWindows.Count -eq 0) {
+              throw "PatchLingo stayed in the process list but did not expose a main window."
+            }
+            Write-Host "Visible PatchLingo window: $($visibleWindows[0].MainWindowTitle)"
+          }
+          finally {
+            Get-Process -Name "PatchLingo" -ErrorAction SilentlyContinue | Stop-Process -Force
+          }
+
+          Write-Host "Built installer: $($setup.Length) bytes; SHA-256 $hash"
+
+      - name: Upload portable Windows app
         uses: actions/upload-artifact@v4
         with:
           name: PatchLingo-Windows
           path: |
             dist/PatchLingo.exe
             dist/PatchLingo.exe.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: PatchLingo-Setup
+          path: |
+            dist/PatchLingo-Setup.exe
+            dist/PatchLingo-Setup.exe.sha256
           if-no-files-found: error
           retention-days: 14

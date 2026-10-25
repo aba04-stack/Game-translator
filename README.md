@@ -96,12 +96,18 @@ python -m pyflakes $(git ls-files '*.py' | grep -v '^tests/')
 Тесты изолированы: каждый получает пустую домашнюю папку (настройки, лог, Global TM) и не трогает ваши данные
 (`tests/conftest.py`).
 
-## Сборка Windows EXE
+## Установка и Windows-сборка
 
-На Windows с Python 3.11+ запусти `build_exe.bat`. Он установит зависимости и создаст
-`dist/PatchLingo.exe`. Для сборки в GitHub открой **Actions → Windows Build**:
-workflow собирает приложение на Windows runner и прикрепляет `PatchLingo.exe` как
-артефакт `PatchLingo-Windows` на 14 дней. Сборка не требует API-ключа.
+Для локальной portable-сборки на Windows с Python 3.11+ запусти `build_exe.bat`;
+результат появится в `dist/PatchLingo.exe`.
+
+Готовый установщик и portable-приложение собираются в GitHub Actions:
+**Actions → Windows Build**. Скачай артефакт `PatchLingo-Setup`, распакуй ZIP
+и запусти `PatchLingo-Setup.exe`. Он устанавливает программу только для текущего
+пользователя и создаёт ярлык в меню «Пуск». Артефакт `PatchLingo-Windows` содержит
+portable `PatchLingo.exe`. Оба артефакта доступны 14 дней; API-ключ для сборки не нужен.
+
+Workflow проверяет запуск установленного приложения в Windows runner.
 
 ## Известные ограничения
 

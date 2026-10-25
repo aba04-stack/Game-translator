@@ -4038,7 +4038,11 @@ def main():
 
     w = MainWindow()
     install_excepthook(w._log)
-    w.show()
+    # Restore a normal, visible window on first launch and request foreground
+    # activation so fresh Windows installs do not leave a background-only process.
+    w.showNormal()
+    w.raise_()
+    w.activateWindow()
 
     w._log("═" * 60)
     w._log("  PatchLingo — RPG Maker / Unity — AI-переводчик")
