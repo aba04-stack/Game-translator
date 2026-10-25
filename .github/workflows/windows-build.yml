@@ -49,7 +49,7 @@ jobs:
       - name: Build Windows installer
         shell: pwsh
         run: |
-          $compiler = Join-Path $env:ProgramFiles(x86) "Inno Setup 6\ISCC.exe"
+          $compiler = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $compiler)) {
             throw "Inno Setup compiler was not found at $compiler"
           }
