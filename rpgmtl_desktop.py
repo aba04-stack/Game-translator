@@ -2612,7 +2612,7 @@ def _redact_secrets(text: str, *known_secrets: str) -> str:
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Game Translator — RPG Maker / Unity — AI-переводчик")
+        self.setWindowTitle("PatchLingo — RPG Maker / Unity — AI-переводчик")
         self.setMinimumSize(960, 700)
         self.resize(1200, 800)
         self._worker: WorkerThread | None = None
@@ -2637,7 +2637,7 @@ class MainWindow(QMainWindow):
 
         # Title
         title_row = QHBoxLayout()
-        title = QLabel("Game Translator — RPG Maker / Unity — AI-переводчик")
+        title = QLabel("PatchLingo — RPG Maker / Unity — AI-переводчик")
         title.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
         title_row.addWidget(title)
         badge = QLabel("Встроенный движок · Dedup · Glossary · Resume")
@@ -3209,10 +3209,10 @@ class MainWindow(QMainWindow):
             QGuiApplication.beep()
         except Exception:
             pass
-        self.setWindowTitle("✓ Перевод завершён — Game Translator")
-        # BUG FIX: таймер сбрасывал заголовок в "Game Translator" (другой),
-        # а не в оригинальный "Game Translator — RPG Maker / Unity — AI-переводчик"
-        QTimer.singleShot(5000, lambda: self.setWindowTitle("Game Translator — RPG Maker / Unity — AI-переводчик"))
+        self.setWindowTitle("✓ Перевод завершён — PatchLingo")
+        # BUG FIX: таймер сбрасывал заголовок в "PatchLingo" (другой),
+        # а не в оригинальный "PatchLingo — RPG Maker / Unity — AI-переводчик"
+        QTimer.singleShot(5000, lambda: self.setWindowTitle("PatchLingo — RPG Maker / Unity — AI-переводчик"))
 
     def _on_inject_complete(self):
         """Показать кнопку открытия папки и статистику после inject."""
@@ -3936,7 +3936,7 @@ class MainWindow(QMainWindow):
 
     def _show_info(self):
         QMessageBox.information(self, "О программе",
-            "Game Translator — RPG Maker / Unity — AI-переводчик\n\n"
+            "PatchLingo — RPG Maker / Unity — AI-переводчик\n\n"
             "Лучшие практики от топ-инструментов:\n\n"
             "• Дедупликация строк (как MTool)\n"
             "  Переводит каждую уникальную строку один раз.\n"
@@ -4041,7 +4041,7 @@ def main():
     w.show()
 
     w._log("═" * 60)
-    w._log("  Game Translator — RPG Maker / Unity — AI-переводчик")
+    w._log("  PatchLingo — RPG Maker / Unity — AI-переводчик")
     w._log("  Встроенный движок · Без внешних зависимостей")
     w._log("═" * 60)
     w._log("")
