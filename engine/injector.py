@@ -126,9 +126,10 @@ def _inject_dialog(data: Any, path: str, translation: str, original: str = "",
     if parent is None or not isinstance(parent, list):
         return False
 
-    # BUG FIX: _apply_warp converts \n → \\n; split on both
-    lines = re.split(r"\n|\\n", translation)
-    original_lines = re.split(r"\n|\\n", original) if original else []
+    # Extractor joins adjacent RPG Maker commands with actual newline characters.
+    # Keep literal \n sequences intact: RPG Maker uses them as text control codes.
+    lines = translation.split("\n")
+    original_lines = original.split("\n") if original else []
     count = end - start + 1
     # BUG FIX (внешний аудит): RPG Maker выделяет ФИКСИРОВАННОЕ число команд
     # под многострочный блок — inject не может добавить/убрать команды, так
@@ -196,9 +197,10 @@ def _inject_scroll(data: Any, path: str, translation: str, original: str = "",
     if parent is None or not isinstance(parent, list):
         return False
 
-    # BUG FIX: _apply_warp converts \n → \\n; split on both
-    lines = re.split(r"\n|\\n", translation)
-    original_lines = re.split(r"\n|\\n", original) if original else []
+    # Extractor joins adjacent RPG Maker commands with actual newline characters.
+    # Keep literal \n sequences intact: RPG Maker uses them as text control codes.
+    lines = translation.split("\n")
+    original_lines = original.split("\n") if original else []
     count = end - start + 1
     # BUG FIX (внешний аудит): см. идентичный комментарий в _inject_dialog —
     # избыток строк схлопывается в последний слот вместо потери текста.
