@@ -80,19 +80,27 @@ jobs:
             throw "The installer did not place PatchLingo.exe in $installDir."
           }
 
+          Get-Process -Name "PatchLingo" -ErrorAction SilentlyContinue | Stop-Process -Force
+          $startTime = Get-Date
           $app = Start-Process -FilePath $installedExe -WorkingDirectory $installDir -PassThru
           try {
-            Start-Sleep -Seconds 10
-            $app.Refresh()
-            if ($app.HasExited) {
-              throw "Installed PatchLingo exited during startup with code $($app.ExitCode)."
+            $visibleWindows = @()
+            for ($attempt = 0; $attempt -lt 15; $attempt++) {
+              Start-Sleep -Seconds 1
+              $processes = Get-Process -Name "PatchLingo" -ErrorAction SilentlyContinue |
+                Where-Object { $_.StartTime -ge $startTime }
+              $visibleWindows = @($processes | Where-Object {
+                $_.MainWindowHandle -ne [IntPtr]::Zero -and $_.MainWindowTitle
+              })
+              if ($visibleWindows.Count -gt 0) { break }
             }
-            Write-Host "Installed PatchLingo stayed open for the startup smoke check."
+            if ($visibleWindows.Count -eq 0) {
+              throw "PatchLingo stayed in the process list but did not expose a main window."
+            }
+            Write-Host "Visible PatchLingo window: $($visibleWindows[0].MainWindowTitle)"
           }
           finally {
-            if (-not $app.HasExited) {
-              Stop-Process -Id $app.Id -Force
-            }
+            Get-Process -Name "PatchLingo" -ErrorAction SilentlyContinue | Stop-Process -Force
           }
 
           Write-Host "Built installer: $($setup.Length) bytes; SHA-256 $hash"
