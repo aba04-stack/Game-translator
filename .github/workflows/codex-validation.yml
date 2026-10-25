@@ -37,6 +37,6 @@ jobs:
       - name: Compile Python modules
         run: python -m compileall -q .
       - name: Run tests
-        run: QT_QPA_PLATFORM=offscreen python -m pytest tests -q
+        run: QT_QPA_PLATFORM=offscreen python -m pytest tests -vv
       - name: Check Python files with pyflakes
         run: python -m pyflakes $(git ls-files '*.py' | grep -v '^tests/')

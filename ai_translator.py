@@ -1255,7 +1255,7 @@ QUALITY_MODES = {
     "balanced": {
         "label": "⚖️ Сбалансированный (рекомендуется)",
         "models": {"openai":"gpt-4o-mini","gemini":"gemini-3.6-flash",
-                   "claude":"claude-haiku-5-5","groq":"openai/gpt-oss-120b","deepseek":"deepseek-v4-flash"},
+                   "claude":"claude-haiku-5-5","groq":"openai/gpt-oss-120b","deepseek":"deepseek-flash"},
         "batch_size": 20, "temperature": 0.2, "use_context": True,
         "description": "Оптимальное соотношение качества и стоимости.",
     },
