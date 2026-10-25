@@ -1,0 +1,40 @@
+name: Game Translator CI
+
+on:
+  push:
+    branches:
+      - main
+      - codex/ci-check-20261025
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  tests-and-lint:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install Linux Qt runtime
+        run: sudo apt-get update && sudo apt-get install -y libegl1
+      - name: Install development dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Smoke test CLI startup
+        run: python cli.py --help
+      - name: Compile Python modules
+        run: python -m compileall -q .
+      - name: Run tests
+        run: QT_QPA_PLATFORM=offscreen python -m pytest tests -q
+      - name: Check Python files with pyflakes
+        run: python -m pyflakes $(git ls-files '*.py' | grep -v '^tests/')
