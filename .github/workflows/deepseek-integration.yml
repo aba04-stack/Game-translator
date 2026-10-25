@@ -1,0 +1,31 @@
+name: DeepSeek Integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-smoke:
+    # Only run trusted code from the default branch with the repository secret.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install Linux Qt runtime
+        run: sudo apt-get update && sudo apt-get install -y libegl1
+      - name: Install project and test dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Smoke test CLI startup
+        run: python cli.py --help
+      - name: Translate and round-trip a small RPG Maker MV fixture
+        run: python scripts/deepseek_integration_smoke.py

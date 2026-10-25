@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - codex/ci-check-20261025
+      - codex/deepseek-integration-tests-20261025
+      - codex/deepseek-integration-tests-20261025
   pull_request:
     branches:
       - main
