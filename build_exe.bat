@@ -8,6 +8,13 @@ echo.
 :: Переходим в папку скрипта (на случай пробелов в пути)
 cd /d "%~dp0"
 
+if not exist "icon.ico" (
+    echo ОШИБКА: файл icon.ico не найден.
+    echo Поместите icon.ico в корневую папку проекта и повторите сборку.
+    if not defined CI pause
+    exit /b 1
+)
+
 python --version >nul 2>&1
 if errorlevel 1 (
     echo ОШИБКА: Python не найден.
@@ -34,6 +41,8 @@ pyinstaller ^
   --onefile ^
   --windowed ^
   --name "PatchLingo" ^
+  --icon "icon.ico" ^
+  --add-data "icon.ico;." ^
   --add-data "engine;engine" ^
   --hidden-import "engine" ^
   --hidden-import "engine.extractor" ^

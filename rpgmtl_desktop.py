@@ -38,7 +38,7 @@ try:
         QTableWidgetItem, QHeaderView, QAbstractItemView,
     )
     from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer
-    from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor
+    from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QTextCursor, QIcon
 except ImportError:
     print("ОШИБКА: PyQt6 не установлен.\nУстановите: pip install PyQt6")
     sys.exit(1)
@@ -4037,6 +4037,11 @@ def main():
     app.setApplicationName("RPG Maker Translator")
 
     w = MainWindow()
+    icon_path = Path(__file__).resolve().parent / "icon.ico"
+    if icon_path.is_file():
+        app_icon = QIcon(str(icon_path))
+        app.setWindowIcon(app_icon)
+        w.setWindowIcon(app_icon)
     install_excepthook(w._log)
     # Restore a normal, visible window on first launch and request foreground
     # activation so fresh Windows installs do not leave a background-only process.
