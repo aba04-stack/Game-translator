@@ -10,6 +10,7 @@ DefaultDirName={localappdata}\Programs\PatchLingo
 DefaultGroupName=PatchLingo
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
+SetupIconFile=..\icon.ico
 UninstallDisplayIcon={app}\PatchLingo.exe
 OutputBaseFilename=PatchLingo-Setup
 Compression=lzma2
