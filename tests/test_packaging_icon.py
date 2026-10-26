@@ -8,7 +8,7 @@ def test_windows_icon_is_a_well_formed_ico_file():
     icon = (ROOT / "icon.ico").read_bytes()
 
     assert len(icon) >= 1024
-    assert icon[:4] == b"\\x00\\x00\\x01\\x00"
+    assert icon[:4] == bytes((0, 0, 1, 0))
     count = int.from_bytes(icon[4:6], "little")
     assert count >= 1
 
