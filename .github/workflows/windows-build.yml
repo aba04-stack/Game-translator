@@ -25,6 +25,28 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Validate ICO resource
+        shell: pwsh
+        run: |
+          $icon = [System.IO.File]::ReadAllBytes("icon.ico")
+          if ($icon.Length -lt 1024) { throw "icon.ico is unexpectedly small ($($icon.Length) bytes)." }
+          if ($icon[0] -ne 0 -or $icon[1] -ne 0 -or $icon[2] -ne 1 -or $icon[3] -ne 0) {
+            throw "icon.ico has an invalid ICO header."
+          }
+          $count = [System.BitConverter]::ToUInt16($icon, 4)
+          if ($count -lt 1) { throw "icon.ico contains no images." }
+          $directoryEnd = 6 + 16 * $count
+          if ($directoryEnd -gt $icon.Length) { throw "icon.ico directory is truncated." }
+          for ($i = 0; $i -lt $count; $i++) {
+            $entry = 6 + 16 * $i
+            $size = [System.BitConverter]::ToUInt32($icon, $entry + 8)
+            $offset = [System.BitConverter]::ToUInt32($icon, $entry + 12)
+            if ($size -lt 1 -or $offset -lt $directoryEnd -or ($offset + $size) -gt $icon.Length) {
+              throw "icon.ico image entry $i points outside the file."
+            }
+          }
+          Write-Host "ICO valid: $count image(s), $($icon.Length) bytes."
+
       - name: Build one-file Windows executable
         run: build_exe.bat
         shell: cmd
